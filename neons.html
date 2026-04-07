@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Project NEONS — Okuyama Taiki</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='14' fill='%23000'/><circle cx='32' cy='32' r='18' fill='none' stroke='%23ff66aa' stroke-width='3' filter='url(%23g)'/><defs><filter id='g'><feGaussianBlur stdDeviation='2.5' result='b'/><feMerge><feMergeNode in='b'/><feMergeNode in='b'/><feMergeNode in='SourceGraphic'/></feMerge></filter></defs></svg>">
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@300;400&family=Space+Mono:wght@400;700&display=swap');
 
@@ -28,10 +29,10 @@ body {
 /* ── HEADER ── */
 header {
   position: fixed;
-  top: 10px; right: 14px;
+  top: 10px; left: 14px;
   z-index: 20;
   pointer-events: none;
-  text-align: right;
+  text-align: left;
 }
 .h-main {
   font-family: 'Cormorant Garamond', serif;
@@ -101,7 +102,7 @@ header {
 .ov-btn {
   width: 38px; height: 38px;
   background: rgba(0,0,0,0.65);
-  border: 0.5px solid rgba(255,255,255,0.15); border-radius: 3px;
+  border: 0.5px solid rgba(255,255,255,0.15); border-radius: 50%;
   color: rgba(255,255,255,0.45); cursor: pointer;
   display: flex; align-items: center; justify-content: center;
   transition: border-color 0.12s, color 0.12s;
@@ -200,11 +201,12 @@ header {
 
 /* Toolbar button (output panel) */
 .tb-btn {
-  width: 48px; padding: 7px 0; background: transparent;
-  border: 0.5px solid rgba(255,255,255,0.12); border-radius: 2px;
+  width: 48px; height: 48px; padding: 0; background: transparent;
+  border: 0.5px solid rgba(255,255,255,0.12); border-radius: 50%;
   font-family: 'Space Mono', monospace;
   font-size: 8px; letter-spacing: 0.08em; color: var(--dim);
   cursor: pointer; transition: border-color 0.12s, color 0.12s;
+  display: flex; align-items: center; justify-content: center;
 }
 .tb-btn:hover, .tb-btn:active { color: var(--text); border-color: rgba(255,255,255,0.3); }
 .tb-btn.active { color: var(--text); border-color: rgba(255,255,255,0.52); }
@@ -218,11 +220,10 @@ input[type=range][style*="vertical"] {
 /* Size buttons — vertical, dot only */
 .size-btn {
   display: flex; align-items: center; justify-content: center;
-  padding: 6px; background: transparent;
-  border: 0.5px solid rgba(255,255,255,0.1); border-radius: 2px;
+  width: 48px; height: 48px; padding: 0; background: transparent;
+  border: 0.5px solid rgba(255,255,255,0.1); border-radius: 50%;
   color: rgba(255,255,255,0.45);
   cursor: pointer; transition: border-color 0.12s, color 0.12s;
-  min-height: 36px; width: 100%;
 }
 .size-btn:hover, .size-btn:active { color: rgba(255,255,255,0.8); border-color: rgba(255,255,255,0.3); }
 .size-btn.active { color: rgba(255,255,255,0.9); border-color: rgba(255,255,255,0.52); }
@@ -240,13 +241,14 @@ input[type=range]::-webkit-slider-thumb {
 
 /* NEON button */
 #btn-neon {
-  width: 100%; padding: 11px 0; margin-bottom: 10px;
+  width: 52px; height: 52px; padding: 0; margin-bottom: 0;
   background: transparent;
-  border: 0.5px solid rgba(255,255,255,0.18); border-radius: 2px;
+  border: 0.5px solid rgba(255,255,255,0.18); border-radius: 50%;
   font-family: 'Space Mono', monospace;
-  font-size: 13px; font-weight: 700; letter-spacing: 0.22em;
+  font-size: 9px; font-weight: 700; letter-spacing: 0.14em;
   color: var(--dim); cursor: pointer;
   transition: border-color 0.15s, color 0.15s;
+  display: flex; align-items: center; justify-content: center;
 }
 #btn-neon:hover { color: var(--text); border-color: rgba(255,255,255,0.4); }
 #btn-neon.active { color: var(--text); border-color: rgba(255,255,255,0.55); }
@@ -323,7 +325,7 @@ select option { background: #111; }
 .ep-row span { font-size: 9px; color: var(--dim); }
 .exp-btn {
   width: 100%; padding: 9px 0; margin-bottom: 5px;
-  background: transparent; border: 0.5px solid var(--border); border-radius: 2px;
+  background: transparent; border: 0.5px solid var(--border); border-radius: 20px;
   font-family: 'Space Mono', monospace;
   font-size: 9px; letter-spacing: 0.12em; color: var(--dim); cursor: pointer;
   transition: border-color 0.12s, color 0.12s;
@@ -353,7 +355,7 @@ select option { background: #111; }
 
 <!-- LOGO (top right, small) -->
 <header>
-  <div class="h-main">Project NEONS <span>α ver.2.4</span></div>
+  <div class="h-main">Project NEONS <span>α ver.2.5</span></div>
   <span class="h-byline">by Okuyama Taiki</span>
 </header>
 
@@ -961,11 +963,22 @@ function stopShine() {
   redrawAll(glowApplied);
 }
 
+function exportFilename(ext) {
+  const now = new Date();
+  const y = now.getFullYear();
+  const mo = String(now.getMonth()+1).padStart(2,'0');
+  const d = String(now.getDate()).padStart(2,'0');
+  const h = String(now.getHours()).padStart(2,'0');
+  const mi = String(now.getMinutes()).padStart(2,'0');
+  const s = String(now.getSeconds()).padStart(2,'0');
+  return `NEONS_${y}${mo}${d}_${h}${mi}${s}.${ext}`;
+}
+
 function exportJPG() {
   const was = shining; if (was) stopShine();
   redrawAll(glowApplied);
   const a = document.createElement('a');
-  a.download = 'neons-okuyamataiki.jpg';
+  a.download = exportFilename('jpg');
   a.href = CV.toDataURL('image/jpeg', 0.95); a.click();
   if (was) startShine();
 }
@@ -1006,7 +1019,7 @@ function exportGIF() {
   }
   gif.on('finished', blob => {
     const url = URL.createObjectURL(blob);
-    const a = document.createElement('a'); a.download='neons-okuyamataiki.gif'; a.href=url; a.click();
+    const a = document.createElement('a'); a.download=exportFilename('gif'); a.href=url; a.click();
     if (was) startShine();
   });
   gif.render();
@@ -1033,7 +1046,7 @@ function exportMP4() {
     const blob = new Blob(chunks, { type: supported.split(';')[0] });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    a.download = 'neons-okuyamataiki.' + ext;
+    a.download = exportFilename(ext);
     a.href = url; a.click();
     URL.revokeObjectURL(url);
     btn.textContent = '↓ MP4';
@@ -1088,7 +1101,7 @@ async function exportPNGSeq() {
       tmp.toBlob(blob => {
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
-        a.download = 'neons_' + String(f).padStart(4,'0') + '.png';
+        a.download = exportFilename('').replace('.','') + '_' + String(f).padStart(4,'0') + '.png';
         a.href = url; a.click();
         URL.revokeObjectURL(url);
         setTimeout(r, 80); // ダウンロード間隔

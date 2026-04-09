@@ -685,19 +685,17 @@ function gpos(e) {
   };
 }
 
-CV.addEventListener('mousedown', e => {
-  drawing = true; strokeCol = currentColor; curStroke = [gpos(e)];
-});
 CV.addEventListener('mousemove', e => {
-  if (!drawing) return;
+  if (panDragging || !drawing) return;
   const p = gpos(e);
   if (curStroke.length > 0) drawStroke([curStroke[curStroke.length-1], p], strokeCol, brushSize, glowApplied, ctx);
   curStroke.push(p);
 });
 CV.addEventListener('mouseup', () => {
-  if (!drawing) return; drawing = false;
+  if (panDragging || !drawing) return;
+  drawing = false;
   if (curStroke.length > 1) {
-    saveHist(); // ← mouseup時（保存直前）に履歴を記録
+    saveHist();
     const idx = colorStrokes[strokeCol].length;
     colorStrokes[strokeCol].push({ points:[...curStroke], size:brushSize });
     drawLog.push({ id:strokeId++, color:strokeCol, idx });
@@ -1177,6 +1175,10 @@ area.addEventListener('wheel', e => {
   applyTransform();
 }, { passive: false });
 // ── キーボードショートカット ──
+let spaceDown = false;
+let panDragging = false;
+let panStartX = 0, panStartY = 0, panStartPanX = 0, panStartPanY = 0;
+
 document.addEventListener('keydown', e => {
   if ((e.metaKey || e.ctrlKey) && e.key === 'z' && !e.shiftKey) {
     e.preventDefault(); undo();
@@ -1184,7 +1186,39 @@ document.addEventListener('keydown', e => {
   if ((e.metaKey || e.ctrlKey) && e.key === 'z' && e.shiftKey) {
     e.preventDefault(); redo();
   }
+  if (e.code === 'Space' && !e.repeat) {
+    e.preventDefault();
+    spaceDown = true;
+    CV.style.cursor = 'grab';
+  }
 });
+document.addEventListener('keyup', e => {
+  if (e.code === 'Space') {
+    spaceDown = false;
+    panDragging = false;
+    CV.style.cursor = 'none';
+  }
+});
+
+// スペース+ドラッグでパン
+CV.addEventListener('mousedown', e => {
+  if (spaceDown) {
+    panDragging = true;
+    panStartX = e.clientX; panStartY = e.clientY;
+    panStartPanX = panX; panStartPanY = panY;
+    CV.style.cursor = 'grabbing';
+    return;
+  }
+  drawing = true; strokeCol = currentColor; curStroke = [gpos(e)];
+});
+
+document.addEventListener('mouseup', e => {
+  if (panDragging) {
+    panDragging = false;
+    CV.style.cursor = spaceDown ? 'grab' : 'none';
+  }
+});
+
 const cursorRing = document.getElementById('cursor-ring');
 cursorRing.style.opacity = '0';
 
@@ -1195,6 +1229,11 @@ function updateCursorSize() {
 }
 
 document.addEventListener('mousemove', e => {
+  if (panDragging) {
+    panX = panStartPanX + (e.clientX - panStartX);
+    panY = panStartPanY + (e.clientY - panStartY);
+    applyTransform();
+  }
   cursorRing.style.left = e.clientX + 'px';
   cursorRing.style.top  = e.clientY + 'px';
   updateCursorSize();

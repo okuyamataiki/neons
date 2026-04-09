@@ -686,7 +686,7 @@ function gpos(e) {
 }
 
 CV.addEventListener('mousedown', e => {
-  drawing = true; strokeCol = currentColor; curStroke = [gpos(e)]; saveHist();
+  drawing = true; strokeCol = currentColor; curStroke = [gpos(e)];
 });
 CV.addEventListener('mousemove', e => {
   if (!drawing) return;
@@ -697,6 +697,7 @@ CV.addEventListener('mousemove', e => {
 CV.addEventListener('mouseup', () => {
   if (!drawing) return; drawing = false;
   if (curStroke.length > 1) {
+    saveHist(); // ← mouseup時（保存直前）に履歴を記録
     const idx = colorStrokes[strokeCol].length;
     colorStrokes[strokeCol].push({ points:[...curStroke], size:brushSize });
     drawLog.push({ id:strokeId++, color:strokeCol, idx });
@@ -704,7 +705,18 @@ CV.addEventListener('mouseup', () => {
   }
   curStroke = [];
 });
-CV.addEventListener('mouseleave', () => { drawing = false; });
+CV.addEventListener('mouseleave', () => {
+  if (!drawing) return;
+  drawing = false;
+  if (curStroke.length > 1) {
+    saveHist(); // ← mouseupと同様、保存直前に履歴を記録
+    const idx = colorStrokes[strokeCol].length;
+    colorStrokes[strokeCol].push({ points:[...curStroke], size:brushSize });
+    drawLog.push({ id:strokeId++, color:strokeCol, idx });
+    updateColorPalette();
+  }
+  curStroke = [];
+});
 
 // ── TOUCH: ピンチズーム + 描画 ──
 let pinching = false;
@@ -727,7 +739,6 @@ function getTouchMid(e) {
 CV.addEventListener('touchstart', e => {
   e.preventDefault();
   if (e.touches.length === 2) {
-    // ピンチ開始
     pinching = true; drawing = false; curStroke = [];
     pinchStartDist = getTouchDist(e);
     pinchStartZoom = zoom;
@@ -735,18 +746,16 @@ CV.addEventListener('touchstart', e => {
     const mid = getTouchMid(e);
     pinchMidX = mid.x; pinchMidY = mid.y;
   } else if (e.touches.length === 1 && !pinching) {
-    drawing = true; strokeCol = currentColor; curStroke = [gpos(e)]; saveHist();
+    drawing = true; strokeCol = currentColor; curStroke = [gpos(e)];
   }
 }, { passive: false });
 
 CV.addEventListener('touchmove', e => {
   e.preventDefault();
   if (e.touches.length === 2) {
-    // ピンチズーム処理
     const dist = getTouchDist(e);
     const newZoom = Math.min(8, Math.max(0.5, pinchStartZoom * (dist / pinchStartDist)));
     const mid = getTouchMid(e);
-    // ミッドポイントを中心にズーム
     const dx = mid.x - pinchMidX;
     const dy = mid.y - pinchMidY;
     panX = pinchStartPanX + dx + (pinchMidX - area.clientWidth/2) * (pinchStartZoom - newZoom);
@@ -766,6 +775,7 @@ CV.addEventListener('touchend', e => {
   if (!drawing) return;
   drawing = false;
   if (curStroke.length > 1) {
+    saveHist(); // ← touchend時（保存直前）に履歴を記録
     const idx = colorStrokes[strokeCol].length;
     colorStrokes[strokeCol].push({ points:[...curStroke], size:brushSize });
     drawLog.push({ id:strokeId++, color:strokeCol, idx });

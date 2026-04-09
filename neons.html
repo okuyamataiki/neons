@@ -946,7 +946,7 @@ function startShine() {
 
   const S = seq.length;
   let step = 0, frame = 0;
-  function fpg() { return Math.max(4, Math.round(50 * Math.pow(1 - flickerSpeed / 100, 1.4))); }
+  function fpg() { return Math.max(1, Math.round(50 * Math.pow(1 - flickerSpeed / 100, 1.4))); }
 
   function tick() {
     if (!shining) return;
@@ -1002,7 +1002,7 @@ function exportGIF() {
   else if (shinePattern === 2) for (let i=0;i<n;i++) seq.push(new Set([allColors[i],allColors[(i+1)%n]]));
   else allColors.forEach(c => { const s=new Set(allColors); s.delete(c); seq.push(s); });
   const S = seq.length;
-  const fpg = Math.max(4, Math.round(50 * Math.pow(1 - flickerSpeed/100, 1.4)));
+  const fpg = Math.max(1, Math.round(50 * Math.pow(1 - flickerSpeed/100, 1.4)));
   const totalF = fpg * S;
   const gif = new GIF({
     workers:2, quality:8,
@@ -1084,7 +1084,7 @@ async function exportPNGSeq() {
   else if (shinePattern === 2) for (let i=0;i<n;i++) seq.push(new Set([allColors[i],allColors[(i+1)%n]]));
   else allColors.forEach(c => { const s=new Set(allColors); s.delete(c); seq.push(s); });
   const S = seq.length;
-  const fpg = Math.max(4, Math.round(50 * Math.pow(1 - flickerSpeed/100, 1.4)));
+  const fpg = Math.max(1, Math.round(50 * Math.pow(1 - flickerSpeed/100, 1.4)));
   const totalSeqFrames = fpg * S;
 
   const tmp = document.createElement('canvas');

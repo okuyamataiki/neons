@@ -91,12 +91,22 @@ header {
 }
 #cv-tl select option { background: #111; }
 
-/* ── UNDO / CLEAR (top right of canvas) ── */
+/* ── TOP RIGHT BUTTONS ── */
 #cv-tr {
   position: fixed;
   top: 10px; right: 14px;
   z-index: 30;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+#cv-tr-row {
   display: flex; gap: 6px;
+}
+#cv-tr-col {
+  display: flex; flex-direction: column; gap: 6px;
+  align-items: flex-end;
 }
 
 /* ── OVERLAY BUTTONS (shared style) ── */
@@ -152,11 +162,11 @@ header {
 
 /* OUTPUT panel: slides in from left, bottom-anchored */
 #panel-output {
-  bottom: 104px; left: 0;
+  top: 0; bottom: 104px; left: 0;
   width: 72px;
-  max-height: calc(70dvh - 104px);
-  border-radius: 0 8px 8px 0;
-  border-left: none;
+  max-height: none;
+  border-radius: 0 0 8px 0;
+  border-top: none; border-left: none;
   transform: translateX(-100%);
 }
 #panel-output.open { transform: translateX(0); }
@@ -389,29 +399,41 @@ select option { background: #111; }
   </select>
 </div>
 
-<!-- UNDO / REDO / CLEAR / ZOOM RESET (top right) -->
+<!-- TOP RIGHT BUTTONS -->
 <div id="cv-tr">
-  <button class="ov-btn" onclick="undo()" title="Undo">
-    <svg width="15" height="15" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
-      <path d="M2 5h6a4 4 0 0 1 0 8H4"/><polyline points="2,2 2,5 5,5"/>
-    </svg>
-  </button>
-  <button class="ov-btn" onclick="redo()" title="Redo" id="btn-redo">
-    <svg width="15" height="15" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
-      <path d="M12 5H6a4 4 0 0 0 0 8h4"/><polyline points="12,2 12,5 9,5"/>
-    </svg>
-  </button>
-  <button class="ov-btn" id="btn-zoom-reset" onclick="resetZoom()" title="ズームリセット">
-    <svg width="15" height="15" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
-      <circle cx="6" cy="6" r="4"/><line x1="9" y1="9" x2="13" y2="13"/>
-      <line x1="4" y1="6" x2="8" y2="6"/><line x1="6" y1="4" x2="6" y2="8"/>
-    </svg>
-  </button>
-  <button class="ov-btn" onclick="clearCanvas()" title="Clear">
-    <svg width="15" height="15" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
-      <line x1="2" y1="2" x2="12" y2="12"/><line x1="12" y1="2" x2="2" y2="12"/>
-    </svg>
-  </button>
+  <!-- 横：戻る → 進む → クリア -->
+  <div id="cv-tr-row">
+    <button class="ov-btn" onclick="undo()" title="Undo">
+      <svg width="15" height="15" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M2 5h6a4 4 0 0 1 0 8H4"/><polyline points="2,2 2,5 5,5"/>
+      </svg>
+    </button>
+    <button class="ov-btn" onclick="redo()" title="Redo" id="btn-redo">
+      <svg width="15" height="15" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 5H6a4 4 0 0 0 0 8h4"/><polyline points="12,2 12,5 9,5"/>
+      </svg>
+    </button>
+    <button class="ov-btn" onclick="clearCanvas()" title="Clear">
+      <svg width="15" height="15" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
+        <line x1="2" y1="2" x2="12" y2="12"/><line x1="12" y1="2" x2="2" y2="12"/>
+      </svg>
+    </button>
+  </div>
+  <!-- 縦：虫眼鏡 → 手のひら -->
+  <div id="cv-tr-col">
+    <button class="ov-btn" id="btn-zoom-reset" onclick="resetZoom()" title="ズームリセット">
+      <svg width="15" height="15" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
+        <circle cx="6" cy="6" r="4"/><line x1="9" y1="9" x2="13" y2="13"/>
+        <line x1="4" y1="6" x2="8" y2="6"/><line x1="6" y1="4" x2="6" y2="8"/>
+      </svg>
+    </button>
+    <button class="ov-btn" id="btn-hand" onclick="toggleHand()" title="手のひらツール">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M6 1.5v6M9 2.5v5M12 4.5v4M3 7.5v3a5 5 0 0 0 10 0v-3"/>
+        <path d="M3 7.5c0-1 .8-1 1-1s1 0 1 1"/>
+      </svg>
+    </button>
+  </div>
 </div>
 
 <!-- BOTTOM-LEFT BUTTONS -->
@@ -438,13 +460,15 @@ select option { background: #111; }
     <div class="sec">
       <div class="lbl">① COLOR</div>
       <div id="color-used" style="display:flex;flex-direction:column;gap:4px"></div>
-      <div id="color-divider" style="display:none;width:24px;height:0.5px;background:rgba(255,255,255,0.1);margin:4px auto"></div>
+      <div id="color-divider" style="display:none;width:36px;height:1px;background:rgba(255,255,255,0.25);margin:10px auto"></div>
       <div id="color-unused" style="display:flex;flex-direction:column;gap:4px"></div>
-      <div style="margin-top:6px;display:flex;justify-content:center;position:relative">
-        <button class="cdot-add" onclick="document.getElementById('color-picker-add').click()" title="色を追加">＋</button>
-        <input type="color" id="color-picker-add" value="#ff0000"
-          style="position:absolute;opacity:0;width:0;height:0;pointer-events:none"
-          onchange="addColor(this.value)">
+      <div style="margin-top:6px;display:flex;justify-content:center">
+        <label class="cdot-add" title="色を追加" style="cursor:pointer">
+          ＋
+          <input type="color" id="color-picker-add" value="#ff0000"
+            style="position:absolute;opacity:0;width:1px;height:1px;pointer-events:none"
+            oninput="addColor(this.value)" onchange="addColor(this.value)">
+        </label>
       </div>
     </div>
     <div class="sec">
@@ -522,12 +546,6 @@ select option { background: #111; }
           <line x1="4" y1="11" x2="24" y2="3"/>
         </svg>
       </button>
-      <!-- EASE: S-curve -->
-      <button class="tb-btn" id="fade-ease" onclick="setFade('ease',this)" title="EASE — S字カーブ">
-        <svg width="28" height="14" viewBox="0 0 28 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M4 11 C4 11 8 11 12 7 C16 3 20 3 24 3"/>
-        </svg>
-      </button>
       <!-- NONE: flat line -->
       <button class="tb-btn" id="fade-none" onclick="setFade('none',this)" title="NONE — 瞬時切替">
         <svg width="28" height="14" viewBox="0 0 28 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
@@ -535,10 +553,15 @@ select option { background: #111; }
           <line x1="14" y1="3" x2="14" y2="11" stroke-width="1" opacity="0.4"/>
         </svg>
       </button>
-      <!-- SIN: sine wave -->
-      <button class="tb-btn" id="fade-sin" onclick="setFade('sin',this)" title="SIN — サイン波">
-        <svg width="28" height="14" viewBox="0 0 28 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M3 7 C6 7 6 2 10 2 C14 2 14 12 18 12 C22 12 22 7 25 7"/>
+      <!-- RANDOM: dice icon -->
+      <button class="tb-btn" id="fade-random" onclick="setFade('random',this)" title="RANDOM — ランダム">
+        <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="2" y="2" width="16" height="16" rx="3"/>
+          <circle cx="7" cy="7" r="1.2" fill="currentColor" stroke="none"/>
+          <circle cx="13" cy="7" r="1.2" fill="currentColor" stroke="none"/>
+          <circle cx="10" cy="10" r="1.2" fill="currentColor" stroke="none"/>
+          <circle cx="7" cy="13" r="1.2" fill="currentColor" stroke="none"/>
+          <circle cx="13" cy="13" r="1.2" fill="currentColor" stroke="none"/>
         </svg>
       </button>
     </div>
@@ -786,7 +809,15 @@ CV.addEventListener('touchstart', e => {
     const mid = getTouchMid(e);
     pinchMidX = mid.x; pinchMidY = mid.y;
   } else if (e.touches.length === 1 && !pinching) {
-    drawing = true; strokeCol = currentColor; curStroke = [gpos(e)];
+    if (spaceDown) {
+      // 手のひらモード：パン開始
+      panDragging = true;
+      panStartX = e.touches[0].clientX;
+      panStartY = e.touches[0].clientY;
+      panStartPanX = panX; panStartPanY = panY;
+    } else {
+      drawing = true; strokeCol = currentColor; curStroke = [gpos(e)];
+    }
   }
 }, { passive: false });
 
@@ -802,6 +833,10 @@ CV.addEventListener('touchmove', e => {
     panY = pinchStartPanY + dy + (pinchMidY - area.clientHeight/2) * (pinchStartZoom - newZoom);
     zoom = newZoom;
     applyTransform();
+  } else if (e.touches.length === 1 && panDragging) {
+    panX = panStartPanX + (e.touches[0].clientX - panStartX);
+    panY = panStartPanY + (e.touches[0].clientY - panStartY);
+    applyTransform();
   } else if (e.touches.length === 1 && drawing && !pinching) {
     const p = gpos(e);
     if (curStroke.length > 0) drawStroke([curStroke[curStroke.length-1], p], strokeCol, brushSize, glowApplied, ctx);
@@ -812,6 +847,7 @@ CV.addEventListener('touchmove', e => {
 CV.addEventListener('touchend', e => {
   e.preventDefault();
   if (e.touches.length < 2) pinching = false;
+  if (panDragging) { panDragging = false; return; }
   if (!drawing) return;
   drawing = false;
   if (curStroke.length > 1) {
@@ -995,20 +1031,33 @@ function setPattern(n) {
 }
 
 // Fade curve適用
-function applyFade(phase) {
-  switch(fadeCurve) {
+let _randomFade = 'linear';
+let _randomLastStep = -1;
+
+function applyFade(phase, step) {
+  let curve = fadeCurve;
+  if (curve === 'random') {
+    // ステップが変わるたびにランダムで選択
+    if (step !== _randomLastStep) {
+      const options = ['linear', 'none', 'sin', 'ease'];
+      _randomFade = options[Math.floor(Math.random() * options.length)];
+      _randomLastStep = step;
+    }
+    curve = _randomFade;
+  }
+  switch(curve) {
     case 'none':   return phase < 0.5 ? 1 : 0;
     case 'linear': return 1 - phase;
     case 'sin':    return Math.sin(phase * Math.PI);
     case 'ease':   return phase < 0.5 ? 2*phase*phase : 1 - Math.pow(-2*phase+2,2)/2;
-    default:       return Math.sin(phase * Math.PI);
+    default:       return 1 - phase;
   }
 }
-function calcMul(inCur, inNext, phase) {
+function calcMul(inCur, inNext, phase, step) {
   const dim = 0.25;
   if (inCur && inNext)  return 0.94;
-  if (inCur && !inNext) return dim + (0.94 - dim) * Math.max(0, applyFade(phase));
-  if (!inCur && inNext) return dim + (0.94 - dim) * Math.max(0, applyFade(1 - phase));
+  if (inCur && !inNext) return dim + (0.94 - dim) * Math.max(0, applyFade(phase, step));
+  if (!inCur && inNext) return dim + (0.94 - dim) * Math.max(0, applyFade(1 - phase, step));
   return dim;
 }
 
@@ -1051,7 +1100,7 @@ function startShine() {
     allColors.forEach(col => {
       const oc = colorCache[col]; if (!oc) return;
       const inCur = curSet.has(col), inNext = nextSet.has(col);
-      const mul = calcMul(inCur, inNext, phase);
+      const mul = calcMul(inCur, inNext, phase, step);
       if (mul < 0.01) return;
       ctx.save(); ctx.globalAlpha = mul; ctx.drawImage(oc, 0, 0); ctx.restore();
     });
@@ -1118,7 +1167,7 @@ function exportGIF() {
     allColors.forEach(col => {
       const strokes = getCSF(col); if (!strokes.length) return;
       const inCur = curSet.has(col), inNext = nextSet.has(col);
-      const mul = calcMul(inCur, inNext, phase);
+      const mul = calcMul(inCur, inNext, phase, step);
       strokes.forEach(s => drawStroke(s.points, col, s.size, true, tc, Math.max(0.03,mul)));
     });
     tc.restore();
@@ -1200,7 +1249,7 @@ async function exportPNGSeq() {
     allColors.forEach(col => {
       const strokes = getCSF(col); if (!strokes.length) return;
       const inCur = curSet.has(col), inNext = nextSet.has(col);
-      const mul = calcMul(inCur, inNext, phase);
+      const mul = calcMul(inCur, inNext, phase, step);
       strokes.forEach(s => drawStroke(s.points, col, s.size, true, tc, Math.max(0.03, mul)));
     });
 
@@ -1334,6 +1383,13 @@ function loadFromLocal() {
     return true;
   } catch(e) { return false; }
 }
+function toggleHand() {
+  spaceDown = !spaceDown;
+  const btn = document.getElementById('btn-hand');
+  btn.classList.toggle('on', spaceDown);
+  CV.style.cursor = spaceDown ? 'grab' : 'none';
+}
+
 let spaceDown = false;
 let panDragging = false;
 let panStartX = 0, panStartY = 0, panStartPanX = 0, panStartPanY = 0;
@@ -1356,6 +1412,8 @@ document.addEventListener('keyup', e => {
     spaceDown = false;
     panDragging = false;
     CV.style.cursor = 'none';
+    const btn = document.getElementById('btn-hand');
+    if (btn) btn.classList.remove('on');
   }
 });
 

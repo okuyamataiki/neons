@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Project NEONS — Okuyama Taiki</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='14' fill='%23000'/><circle cx='32' cy='32' r='18' fill='none' stroke='%23ff66aa' stroke-width='3' filter='url(%23g)'/><defs><filter id='g'><feGaussianBlur stdDeviation='2.5' result='b'/><feMerge><feMergeNode in='b'/><feMergeNode in='b'/><feMergeNode in='SourceGraphic'/></feMerge></filter></defs></svg>">
+<link rel="apple-touch-icon" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAIAAAAlC+aJAAADHElEQVR42u1aLZfqMBCd4ayo679ZiUTuWVW5KFaisKuwKOSuKrKKg0RW9t/U4fJE0mmaNl8lLeXROQjgQHrvzJ1JMgnAbLO9tmHwEdn7p+WRxXlyBBqgo9jy61sZkMxbEOhYnNly7UqA0Ocp/f0BERBeJ7jVG7we2ceP9nmXPVtt1VDcyt408F7oLQKWIEj6UQj0o7HogR6LM0Qxf+H1SO/7veQRsDhba8BdEWDvn+T4WipKKHwjwB3PpVV94x4H9JUN5ilbbRugoxgA8LRh35mH534T9vWn0IBbidcjW67d5YTusmHLde3+y54lhw7fV+C0Q7VJEvRsxz5+6o95KuR6JwEZvZAN0Wh63YDbzEREg6BXcnLhgK66l9BjtmNff7LjvaBrA3Ir8bRhyUHmYM0H9EWvyKY39G4alA/OHBZW9JinAEDo8bQJi74xDo0fxbzEYZ5CFBtqKzolLocuKScU9O5QSFoSEdAngzECFXq87AFgaPT1yFHMKyxe9iIatNByJCBLHwBExXRepQUwjjs58MWV+NglJMtSoiH9oLq35oOSDB4RUNwvq3No9DKHxkShD8Kbi/tHFY8iJEIiL6IMETDMfOO43/ys9nJ1YSg+ivofs2evMkFXjuz7gTHVb86EMBuaqdnCWn8m1ALqqkULl/ozvn6UidkwIfxfEpoJzARmAjOBmUAYAnjZ037UZUEykNEWmfoUFgJYnPlP6w74lKyzy/ICOeC4rB1IP9ZlWAcBzNM6AW6l6CE/Sja8Zyo1iCwEDEcMYwZB96z2jtckIaUWPcCM9Ucvoa5aNGYmtNVv6PJakpiCQJkwNAcan9RvcL9+ImsGAbPd2ELi0LOd2f22HKjKkeh0nzZDT8xydxqon9VVfGqQpuGq8wFxqle1iYhAwL2yPKZcOunMT9tus4w7+ROapz8jc1oL8WRgqy0vSnR2QrjZd+abGPJf8DcRydZEb5C+RwTg2c+JayHB057Uq/kAT3hXQicnlYY/gfoGkbNs7iIAE7sv9JI3tto0/O7MVbgffGeuIxqeBCDErcWnvzc622x32j+T2NwpaEeuGgAAAABJRU5ErkJggg==">
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@300;400&family=Space+Mono:wght@400;700&display=swap');
 
@@ -738,6 +739,7 @@ CV.addEventListener('mouseup', () => {
     drawLog.push({ id:strokeId++, color:strokeCol, idx });
     rebuildCache(strokeCol);
     updateColorPalette();
+    saveToLocal();
   }
   curStroke = [];
 });
@@ -751,6 +753,7 @@ CV.addEventListener('mouseleave', () => {
     drawLog.push({ id:strokeId++, color:strokeCol, idx });
     rebuildCache(strokeCol);
     updateColorPalette();
+    saveToLocal();
   }
   curStroke = [];
 });
@@ -818,6 +821,7 @@ CV.addEventListener('touchend', e => {
     drawLog.push({ id:strokeId++, color:strokeCol, idx });
     rebuildCache(strokeCol);
     updateColorPalette();
+    saveToLocal();
   }
   curStroke = [];
 }, { passive: false });
@@ -954,6 +958,7 @@ function clearCanvas() {
   Object.keys(colorStrokes).forEach(k => { colorStrokes[k] = []; });
   drawLog = []; stopShine(); glowApplied = false;
   updateNeonBtn(); fillBg(); updateColorPalette();
+  localStorage.removeItem(SAVE_KEY);
 }
 
 // ── NEON + SHINE 統合ボタン ──
@@ -1268,7 +1273,67 @@ area.addEventListener('wheel', e => {
   zoom = newZoom;
   applyTransform();
 }, { passive: false });
-// ── キーボードショートカット ──
+// ── ローカルストレージ 自動保存／復元 ──
+const SAVE_KEY = 'neons_autosave';
+
+function saveToLocal() {
+  try {
+    const data = {
+      version: 1,
+      W, H, bgColor,
+      colorStrokes: JSON.parse(JSON.stringify(colorStrokes)),
+      drawLog: drawLog.map(e => ({...e})),
+      strokeId,
+      allColors: ALL_COLORS.slice()
+    };
+    localStorage.setItem(SAVE_KEY, JSON.stringify(data));
+  } catch(e) { /* 容量超過などは無視 */ }
+}
+
+function loadFromLocal() {
+  try {
+    const raw = localStorage.getItem(SAVE_KEY);
+    if (!raw) return false;
+    const data = JSON.parse(raw);
+    if (!data || data.version !== 1) return false;
+
+    // キャンバスサイズを復元
+    W = data.W || 1080; H = data.H || 1920;
+    CV.width = W; CV.height = H;
+    // サイズセレクターを合わせる
+    const sel = document.querySelector('#cv-tl select');
+    if (sel) {
+      const val = W + ',' + H;
+      [...sel.options].forEach(o => { o.selected = (o.value === val); });
+    }
+
+    // 背景色を復元
+    bgColor = data.bgColor || '#000000';
+    document.querySelectorAll('.bg-dot').forEach(b => {
+      b.classList.toggle('active', b.dataset.bg === bgColor);
+    });
+
+    // カラーを復元
+    if (data.allColors) {
+      data.allColors.forEach(c => {
+        if (!ALL_COLORS.includes(c)) {
+          ALL_COLORS.push(c);
+          colorStrokes[c] = [];
+        }
+      });
+    }
+
+    // ストロークを復元
+    Object.keys(colorStrokes).forEach(k => { colorStrokes[k] = []; });
+    Object.keys(data.colorStrokes || {}).forEach(k => {
+      colorStrokes[k] = data.colorStrokes[k] || [];
+    });
+    drawLog = data.drawLog || [];
+    strokeId = data.strokeId || 0;
+
+    return true;
+  } catch(e) { return false; }
+}
 let spaceDown = false;
 let panDragging = false;
 let panStartX = 0, panStartY = 0, panStartPanX = 0, panStartPanY = 0;
@@ -1336,7 +1401,14 @@ CV.addEventListener('mouseenter', () => { cursorRing.style.opacity = '1'; });
 CV.addEventListener('mouseleave', () => { cursorRing.style.opacity = '0'; });
 
 window.addEventListener('resize', fit);
+
+// 起動時にローカルストレージから復元
+const restored = loadFromLocal();
 initCanvas();
+if (restored) {
+  rebuildAllCaches();
+  redrawAll(glowApplied);
+}
 updateRedoBtn();
 updateColorPalette();
 </script>

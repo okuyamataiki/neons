@@ -202,6 +202,9 @@ header {
   cursor: pointer;
   transition: border-color 0.12s;
   width: 100%;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
 }
 .cdot-btn:hover { border-color: rgba(255,255,255,0.15); }
 .cdot-btn.active { border-color: rgba(255,255,255,0.5); }
@@ -460,14 +463,33 @@ select option { background: #111; }
     <div class="sec">
       <div class="lbl">① COLOR</div>
       <div id="color-used" style="display:flex;flex-direction:column;gap:4px"></div>
+      <!-- カラーピッカー（使用済みの下） -->
+      <div style="margin-top:8px;display:flex;align-items:center;justify-content:center">
+        <div style="position:relative;display:flex;align-items:center;justify-content:center">
+          <svg id="color-wheel-icon" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="rgba(255,255,255,0.4)" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" style="pointer-events:none;position:absolute;z-index:1;opacity:0.2;transition:opacity 0.15s">
+            <circle cx="8" cy="8" r="6"/>
+            <path d="M8 2 A6 6 0 0 1 14 8" stroke="rgba(255,100,100,0.6)" stroke-width="2"/>
+            <path d="M14 8 A6 6 0 0 1 8 14" stroke="rgba(100,200,100,0.6)" stroke-width="2"/>
+            <path d="M8 14 A6 6 0 0 1 2 8" stroke="rgba(100,100,255,0.6)" stroke-width="2"/>
+            <path d="M2 8 A6 6 0 0 1 8 2" stroke="rgba(200,200,100,0.6)" stroke-width="2"/>
+            <circle cx="8" cy="8" r="2" fill="rgba(255,255,255,0.3)" stroke="none"/>
+          </svg>
+          <input type="color" id="color-edit-picker" value="#ff2244"
+            style="width:28px;height:28px;border:none;padding:0;background:transparent;cursor:pointer;border-radius:50%;overflow:hidden;opacity:0.01;pointer-events:none"
+            oninput="onEditPickerInput(this.value)"
+            onchange="onEditPickerChange(this.value)">
+        </div>
+      </div>
       <div id="color-divider" style="display:none;width:36px;height:1px;background:rgba(255,255,255,0.25);margin:10px auto"></div>
       <div id="color-unused" style="display:flex;flex-direction:column;gap:4px"></div>
       <div style="margin-top:6px;display:flex;justify-content:center">
-        <label class="cdot-add" title="色を追加" style="cursor:pointer">
+        <label class="cdot-add" title="色を追加" style="cursor:pointer"
+          ontouchstart="lockScroll()" onmousedown="lockScroll()">
           ＋
           <input type="color" id="color-picker-add" value="#ff0000"
             style="position:absolute;opacity:0;width:1px;height:1px;pointer-events:none"
-            oninput="addColor(this.value)" onchange="addColor(this.value)">
+            oninput="addColor(this.value)"
+            onchange="addColor(this.value);unlockScroll()">
         </label>
       </div>
     </div>
@@ -623,16 +645,138 @@ let curStroke = [], strokeCol = '#ff2244';
 let history = [];
 let redoStack = [];
 
-function makeDot(color) {
+let colorEditMode = false; // 後方互換のため残す
+let _editingColor = null;
+
+function updatePickerState() {
+  const picker = document.getElementById('color-edit-picker');
+  const icon = document.getElementById('color-wheel-icon');
+  const enabled = !!_editingColor;
+  if (picker) picker.style.pointerEvents = enabled ? 'auto' : 'none';
+  if (icon) icon.style.opacity = enabled ? '1' : '0.2';
+}
+
+function onEditPickerInput(val) {
+  const preview = document.getElementById('color-edit-preview');
+  if (preview) preview.style.background = val;
+  if (_editingColor) replaceColorPreview(_editingColor, val);
+}
+
+function onEditPickerChange(val) {
+  if (_editingColor) {
+    replaceColor(_editingColor, val);
+    _editingColor = val;
+  }
+  currentColor = val;
+  const picker = document.getElementById('color-edit-picker');
+  const preview = document.getElementById('color-edit-preview');
+  if (picker) picker.value = val;
+  if (preview) preview.style.background = val;
+}
+let _scrollY = 0;
+
+function lockScroll() {
+  pickerOpen = true;
+  CV.style.pointerEvents = 'none';
+  _scrollY = window.scrollY;
+  document.body.style.cssText += ';overflow:hidden!important;position:fixed;top:-' + _scrollY + 'px;left:0;right:0;touch-action:none';
+}
+
+function unlockScroll() {
+  pickerOpen = false;
+  CV.style.pointerEvents = 'auto';
+  document.body.style.overflow = '';
+  document.body.style.position = '';
+  document.body.style.top = '';
+  document.body.style.left = '';
+  document.body.style.right = '';
+  document.body.style.touchAction = '';
+  window.scrollTo(0, _scrollY);
+}
+
+function makeDot(color, isUsed) {
   const d = document.createElement('div');
   d.className = 'cdot-btn' + (color === currentColor ? ' active' : '');
   d.dataset.color = color;
-  d.onclick = () => setColor(d);
+  d.onclick = () => {
+    setColor(d);
+    // ピッカーを選択色に同期
+    const picker = document.getElementById('color-edit-picker');
+    const preview = document.getElementById('color-edit-preview');
+    if (picker) picker.value = color;
+    if (preview) preview.style.background = color;
+    _editingColor = isUsed ? color : null;
+    updatePickerState();
+  };
   const dot = document.createElement('div');
   dot.className = 'cdot-dot';
-  dot.style.background = color === '#ffffff' ? '#fff' : color;
+  dot.style.background = color;
   d.appendChild(dot);
   return d;
+}
+
+function replaceColorPreview(oldColor, newColor) {
+  // DOM操作なし・履歴なし。キャンバスだけ更新してプレビュー
+  newColor = newColor.toLowerCase();
+  if (oldColor === newColor) return;
+
+  // 一時的にdrawLogの色を置き換えてプレビュー描画
+  drawLog.forEach(e => { if (e.color === oldColor) e.color = '__preview__'; });
+  colorStrokes['__preview__'] = colorStrokes[oldColor] || [];
+
+  // キャッシュを一時生成
+  const oc = getOrCreateCache('__preview__');
+  const oc_ctx = oc.getContext('2d');
+  oc_ctx.clearRect(0, 0, W, H);
+  const strokes = drawLog.filter(e => e.color === '__preview__').map(e => colorStrokes['__preview__'][e.idx]).filter(Boolean);
+  strokes.forEach(s => drawStroke(s.points, newColor, s.size, true, oc_ctx, 1));
+
+  ctx.fillStyle = bgColor; ctx.fillRect(0, 0, W, H);
+  ALL_COLORS.forEach(col => {
+    const c = col === oldColor ? '__preview__' : col;
+    const cache = colorCache[c]; if (!cache) return;
+    if (drawLog.filter(e => e.color === c).length === 0) return;
+    ctx.save(); ctx.globalAlpha = 1; ctx.drawImage(cache, 0, 0); ctx.restore();
+  });
+
+  // 元に戻す
+  drawLog.forEach(e => { if (e.color === '__preview__') e.color = oldColor; });
+  delete colorStrokes['__preview__'];
+  delete colorCache['__preview__'];
+}
+
+function replaceColor(oldColor, newColor) {
+  newColor = newColor.toLowerCase();
+  if (oldColor === newColor) return;
+  if (ALL_COLORS.includes(newColor)) return; // 既存色との重複を避ける
+
+  saveHist();
+
+  // ALL_COLORSを置き換え
+  const idx = ALL_COLORS.indexOf(oldColor);
+  if (idx !== -1) ALL_COLORS[idx] = newColor;
+
+  // colorStrokesのキーを移行
+  colorStrokes[newColor] = colorStrokes[oldColor] || [];
+  delete colorStrokes[oldColor];
+
+  // colorCacheを移行
+  if (colorCache[oldColor]) {
+    colorCache[newColor] = colorCache[oldColor];
+    delete colorCache[oldColor];
+  }
+
+  // drawLogの色を一括置換
+  drawLog.forEach(e => { if (e.color === oldColor) e.color = newColor; });
+
+  // 現在の選択色も更新
+  if (currentColor === oldColor) currentColor = newColor;
+
+  // キャッシュ再構築
+  rebuildCache(newColor);
+  redrawAll(glowApplied);
+  updateColorPalette();
+  saveToLocal();
 }
 
 function updateColorPalette() {
@@ -648,8 +792,8 @@ function updateColorPalette() {
   usedEl.innerHTML = '';
   unusedEl.innerHTML = '';
 
-  usedColors.forEach(c => usedEl.appendChild(makeDot(c)));
-  unusedColors.forEach(c => unusedEl.appendChild(makeDot(c)));
+  usedColors.forEach(c => usedEl.appendChild(makeDot(c, true)));
+  unusedColors.forEach(c => unusedEl.appendChild(makeDot(c, false)));
 
   divEl.style.display = (usedColors.length > 0 && unusedColors.length > 0) ? 'block' : 'none';
 }
@@ -800,6 +944,7 @@ function getTouchMid(e) {
 }
 
 CV.addEventListener('touchstart', e => {
+  if (pickerOpen) return;
   e.preventDefault();
   if (e.touches.length === 2) {
     pinching = true; drawing = false; curStroke = [];
@@ -810,7 +955,6 @@ CV.addEventListener('touchstart', e => {
     pinchMidX = mid.x; pinchMidY = mid.y;
   } else if (e.touches.length === 1 && !pinching) {
     if (spaceDown) {
-      // 手のひらモード：パン開始
       panDragging = true;
       panStartX = e.touches[0].clientX;
       panStartY = e.touches[0].clientY;
@@ -822,6 +966,7 @@ CV.addEventListener('touchstart', e => {
 }, { passive: false });
 
 CV.addEventListener('touchmove', e => {
+  if (pickerOpen) return;
   e.preventDefault();
   if (e.touches.length === 2) {
     const dist = getTouchDist(e);
@@ -845,6 +990,7 @@ CV.addEventListener('touchmove', e => {
 }, { passive: false });
 
 CV.addEventListener('touchend', e => {
+  if (pickerOpen) return;
   e.preventDefault();
   if (e.touches.length < 2) pinching = false;
   if (panDragging) { panDragging = false; return; }
@@ -1391,6 +1537,7 @@ function toggleHand() {
 }
 
 let spaceDown = false;
+let pickerOpen = false;
 let panDragging = false;
 let panStartX = 0, panStartY = 0, panStartPanX = 0, panStartPanY = 0;
 
@@ -1469,6 +1616,11 @@ if (restored) {
 }
 updateRedoBtn();
 updateColorPalette();
+// ピッカーを初期色に同期
+const _initPicker = document.getElementById('color-edit-picker');
+const _initPreview = document.getElementById('color-edit-preview');
+if (_initPicker) _initPicker.value = currentColor;
+if (_initPreview) _initPreview.style.background = currentColor;
 </script>
 </body>
 </html>

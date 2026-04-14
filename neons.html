@@ -306,6 +306,78 @@ input[type=range]::-webkit-slider-thumb {
 }
 .export-btn:hover, .export-btn:active { border-color: rgba(255,255,255,0.28); color: var(--text); }
 
+/* ── 3D VIEW ── */
+#view-3d {
+  position: fixed; inset: 0; z-index: 150;
+  background: #000;
+  display: none;
+  pointer-events: none;
+}
+#view-3d.open { display: block; pointer-events: auto; }
+#canvas-3d { position: absolute; inset: 0; display: block; }
+
+#btn-3d-exit {
+  position: absolute; bottom: 18px; left: 16px; z-index: 10;
+  background: rgba(0,0,0,0.65);
+  border: 0.5px solid rgba(255,255,255,0.15); border-radius: 50%;
+  color: rgba(255,255,255,0.45); cursor: pointer;
+  width: 38px; height: 38px;
+  font-family: 'Space Mono', monospace;
+  font-size: 8px; font-weight: 700; letter-spacing: 0.12em;
+  display: flex; align-items: center; justify-content: center;
+  transition: border-color 0.12s, color 0.12s;
+}
+#btn-3d-exit:hover { border-color: rgba(255,255,255,0.45); color: rgba(255,255,255,0.9); }
+
+#hint-3d {
+  position: absolute; bottom: 18px; left: 50%; transform: translateX(-50%);
+  font-size: 8px; letter-spacing: 0.16em; color: rgba(255,255,255,0.14);
+  pointer-events: none; white-space: nowrap;
+  font-family: 'Space Mono', monospace;
+}
+#loading-3d {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 8px; letter-spacing: 0.24em; color: rgba(255,255,255,0.25);
+  font-family: 'Space Mono', monospace;
+  pointer-events: none;
+}
+#label-3d-strokes {
+  position: absolute; top: 14px; left: 14px;
+  font-size: 8px; letter-spacing: 0.18em; color: rgba(255,255,255,0.2);
+  font-family: 'Cormorant Garamond', serif; font-weight: 300;
+  pointer-events: none;
+  line-height: 1.5;
+}
+#autorotate-toggle {
+  position: absolute; bottom: 18px; right: 16px; z-index: 10;
+  background: rgba(0,0,0,0.65);
+  border: 0.5px solid rgba(255,255,255,0.15); border-radius: 50%;
+  color: rgba(255,255,255,0.35); cursor: pointer;
+  width: 38px; height: 38px;
+  display: flex; align-items: center; justify-content: center;
+  transition: border-color 0.12s, color 0.12s;
+}
+#autorotate-toggle.on { border-color: rgba(255,255,255,0.45); color: rgba(255,255,255,0.8); }
+#autorotate-toggle:hover { border-color: rgba(255,255,255,0.35); color: rgba(255,255,255,0.7); }
+
+/* 3D エクスポートボタン群 */
+#export-3d {
+  position: absolute; top: 58px; right: 16px; z-index: 10;
+  display: flex; flex-direction: column; gap: 5px;
+}
+.exp3d-btn {
+  background: rgba(0,0,0,0.65);
+  border: 0.5px solid rgba(255,255,255,0.15); border-radius: 20px;
+  color: rgba(255,255,255,0.38); cursor: pointer;
+  font-family: 'Space Mono', monospace; font-size: 8px;
+  letter-spacing: 0.12em; padding: 6px 11px;
+  transition: border-color 0.12s, color 0.12s;
+  white-space: nowrap;
+}
+.exp3d-btn:hover { border-color: rgba(255,255,255,0.38); color: rgba(255,255,255,0.85); }
+.exp3d-btn.on   { border-color: rgba(255,80,80,0.6);    color: rgba(255,120,120,0.9); }
+
 select {
   background: transparent; border: 0.5px solid var(--border); border-radius: 2px;
   color: var(--text); font-family: 'Space Mono', monospace;
@@ -452,6 +524,14 @@ select option { background: #111; }
   <button class="ov-btn" id="btn-output" onclick="toggleOutput()" title="Output">
     <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">
       <polygon points="9,1 2,9 7,9 7,15 14,7 9,7"/>
+    </svg>
+  </button>
+  <!-- 3D VIEW button -->
+  <button class="ov-btn" id="btn-3d" onclick="toggle3D()" title="3D View">
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M8 1.5L14.5 5V11L8 14.5L1.5 11V5L8 1.5Z"/>
+      <path d="M8 1.5V14.5"/>
+      <path d="M1.5 5L8 8.5L14.5 5"/>
     </svg>
   </button>
 </div>
@@ -618,6 +698,27 @@ select option { background: #111; }
     <button class="exp-btn" id="btn-mp4" onclick="exportMP4()">↓ MP4</button>
     <button class="exp-btn" id="btn-png-seq" onclick="exportPNGSeq()">↓ PNG連番</button>
   </div>
+</div>
+
+<!-- 3D VIEW OVERLAY -->
+<div id="view-3d">
+  <canvas id="canvas-3d"></canvas>
+  <div id="loading-3d">LOADING THREE.JS ...</div>
+  <div id="label-3d-strokes"></div>
+  <button id="btn-3d-exit" onclick="exit3D()">2D</button>
+  <!-- エクスポートボタン群 -->
+  <div id="export-3d">
+    <button class="exp3d-btn" onclick="export3DStill('jpg')">↓ JPG</button>
+    <button class="exp3d-btn" onclick="export3DStill('png')">↓ PNG</button>
+    <button class="exp3d-btn" id="btn-3d-mp4" onclick="toggle3DMP4()">↓ MP4</button>
+  </div>
+  <div id="hint-3d">drag — orbit &nbsp;·&nbsp; scroll — zoom &nbsp;·&nbsp; Esc — exit</div>
+  <button id="autorotate-toggle" class="on" onclick="toggle3DAutoRotate()" title="Auto-rotate">
+    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M2 7a5 5 0 1 1 1.5 3.5"/>
+      <polyline points="2,10.5 2,7 5.5,7"/>
+    </svg>
+  </button>
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/gif.js/0.2.0/gif.js"></script>
@@ -1621,6 +1722,445 @@ const _initPicker = document.getElementById('color-edit-picker');
 const _initPreview = document.getElementById('color-edit-preview');
 if (_initPicker) _initPicker.value = currentColor;
 if (_initPreview) _initPreview.style.background = currentColor;
+
+// ─────────────────────────────────────────────────────────────────
+//  3D VIEW ENGINE
+//  <script>タグ注入でThree.jsをロード（file://でも動作）
+//  グロー = AdditiveBlending の多層チューブで再現（ポストプロセスなし）
+// ─────────────────────────────────────────────────────────────────
+let _3dOpen    = false;
+let _3dReady   = false;
+let _3dLoading = false;
+let _3dAnimId  = null;
+
+let _renderer3d, _scene3d, _camera3d, _controls3d;
+let _tubeGroup3d;
+let _flickerGroups3d = {};
+let _autoRotate3d = true;
+
+const SCENE_W_3D = 10;
+
+// ── Script-tag loader（file://でも動作） ────────────────────────
+function _loadScript(src) {
+  return new Promise((resolve, reject) => {
+    if (document.querySelector('script[src="' + src + '"]')) { resolve(); return; }
+    const s = document.createElement('script');
+    s.src = src;
+    s.onload = resolve;
+    s.onerror = () => reject(new Error('Failed to load: ' + src));
+    document.head.appendChild(s);
+  });
+}
+
+async function _load3DLibs() {
+  if (_3dReady) return true;
+  if (_3dLoading) return false;
+  _3dLoading = true;
+  try {
+    await _loadScript('https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js');
+    await _loadScript('https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js');
+    _3dReady   = true;
+    _3dLoading = false;
+    return true;
+  } catch(e) {
+    _3dLoading = false;
+    console.error('Three.js load failed:', e);
+    return false;
+  }
+}
+
+// ── 座標変換 ────────────────────────────────────────────────────
+function _toV3(x, y, cw, ch) {
+  return new THREE.Vector3(
+    (x / cw - 0.5) * SCENE_W_3D,
+    -(y / ch - 0.5) * SCENE_W_3D * (ch / cw),
+    0
+  );
+}
+
+// ── 共有リソース ─────────────────────────────────────────────────
+let _capGeo = null;     // 端キャップ用高解像度球体
+let _colorGroups3d = {};
+let _colorSpeeds3d = {};
+
+// 球体キャップを端点に配置（方向不要・常に安定）
+function _addCap(grp, mat, pt, r) {
+  if (!_capGeo) _capGeo = new THREE.SphereGeometry(1, 20, 14);
+  const cap = new THREE.Mesh(_capGeo, mat);
+  cap.scale.setScalar(r);
+  cap.position.copy(pt);
+  grp.add(cap);
+}
+
+// ── L1: ガス柱 ───────────────────────────────────────────────────
+function _addGasRod(grp, curve, segs, r, color) {
+  const geo = new THREE.TubeGeometry(curve, segs, r, 16, false);
+  const mat = new THREE.MeshBasicMaterial({
+    color: new THREE.Color(color), transparent: true, opacity: 0.94, depthWrite: false,
+  });
+  grp.add(new THREE.Mesh(geo, mat));
+  _addCap(grp, mat, curve.getPoint(0), r);
+  _addCap(grp, mat, curve.getPoint(1), r);
+  return mat;
+}
+
+// ── L2: ガラス管 ─────────────────────────────────────────────────
+function _addGlassTube(grp, curve, segs, r, color) {
+  const geo = new THREE.TubeGeometry(curve, segs, r * 1.04, 18, false);
+  const mat = new THREE.MeshPhongMaterial({
+    color:             new THREE.Color(0x000000),
+    emissive:          new THREE.Color(color),
+    emissiveIntensity: 0.06,
+    transparent:       true, opacity: 0.08,
+    shininess:         640, specular: new THREE.Color(0xffffff),
+    depthWrite:        false, side: THREE.FrontSide,
+  });
+  grp.add(new THREE.Mesh(geo, mat));
+  _addCap(grp, mat, curve.getPoint(0), r * 1.04);
+  _addCap(grp, mat, curve.getPoint(1), r * 1.04);
+  return mat;
+}
+
+// ── L3–5: グローハロー ────────────────────────────────────────────
+function _addGlowHalo(grp, curve, segs, r, color, opacity, radSeg, startPt, endPt) {
+  const geo = new THREE.TubeGeometry(curve, segs, r, radSeg, false);
+  const mat = new THREE.MeshBasicMaterial({
+    color: new THREE.Color(color), transparent: true, opacity,
+    blending: THREE.AdditiveBlending, depthWrite: false,
+  });
+  grp.add(new THREE.Mesh(geo, mat));
+  _addCap(grp, mat, startPt, r);
+  _addCap(grp, mat, endPt, r);
+  return mat;
+}
+
+// ── 全ストロークをチューブ化（5層構成） ─────────────────────────
+function _buildTubes3D() {
+  _tubeGroup3d.traverse(c => {
+    if (c.isMesh) { c.geometry?.dispose(); c.material?.dispose(); }
+  });
+  _tubeGroup3d.clear();
+  _flickerGroups3d = {};
+  _colorGroups3d   = {};
+  _colorSpeeds3d   = {};
+
+  _capGeo = null;
+
+  _scene3d.background = new THREE.Color(bgColor);
+
+  const seen = new Set(), usedColors = [];
+  drawLog.forEach(e => {
+    if (!seen.has(e.color)) { seen.add(e.color); usedColors.push(e.color); }
+  });
+
+  const n = usedColors.length;
+  usedColors.forEach((color, ci) => {
+    const grp = new THREE.Group();
+    _tubeGroup3d.add(grp);
+    _colorGroups3d[color] = grp;
+    _colorSpeeds3d[color] = {
+      zAmp:     0.6 + ci * 0.55,
+      zFreq:    0.04 + ci * 0.025,   // 色ごとに異なるスピード → ここだけで徐々にズレる
+      tiltAmp:  0.03 + ci * 0.012,
+      tiltFreq: 0.025 + ci * 0.018,
+    };
+  });
+
+  let strokeCount = 0;
+
+  usedColors.forEach(color => {
+    const strokes = colorStrokes[color];
+    if (!strokes?.length) return;
+    const grp = _colorGroups3d[color];
+
+    strokes.forEach(({ points, size }) => {
+      if (!points || points.length < 3) return;
+
+      const step = Math.max(1, Math.ceil(points.length / 260));
+      let samp = points.filter((_, i) => i % step === 0);
+      if (samp[samp.length-1] !== points[points.length-1]) samp.push(points[points.length-1]);
+      if (samp.length < 3) return;
+
+      const pts3  = samp.map(p => _toV3(p.x, p.y, W, H));
+      const curve = new THREE.CatmullRomCurve3(pts3, false, 'catmullrom', 0.5);
+      const segs  = Math.min(480, samp.length * 2);
+      const r     = Math.max(0.07, (size * 0.5 / W) * SCENE_W_3D * 2.0);
+      const startPt = pts3[0];
+      const endPt   = pts3[pts3.length - 1];
+
+      if (!_flickerGroups3d[color]) _flickerGroups3d[color] = [];
+
+      // L1: ガス柱（純色・実体）
+      const m1 = _addGasRod(grp, curve, segs, r, color);
+      _flickerGroups3d[color].push({ mat: m1, kind: 'gas', base: 0.94 });
+
+      // L2: ガラス管（薄壁・高shininess）
+      const m2 = _addGlassTube(grp, curve, segs, r, color);
+      _flickerGroups3d[color].push({ mat: m2, kind: 'glass', base: 0.06 });
+
+      // L3–L5: グローハロー
+      const m3 = _addGlowHalo(grp, curve, segs, r * 1.55, color, 0.22, 9, startPt, endPt);
+      _flickerGroups3d[color].push({ mat: m3, kind: 'glow', base: 0.22 });
+
+      const m4 = _addGlowHalo(grp, curve, segs, r * 2.8,  color, 0.07, 7, startPt, endPt);
+      _flickerGroups3d[color].push({ mat: m4, kind: 'glow', base: 0.07 });
+
+      const m5 = _addGlowHalo(grp, curve, segs, r * 5.0,  color, 0.022, 5, startPt, endPt);
+      _flickerGroups3d[color].push({ mat: m5, kind: 'glow', base: 0.022 });
+
+      strokeCount++;
+    });
+  });
+
+  const lbl = document.getElementById('label-3d-strokes');
+  if (lbl) lbl.textContent = strokeCount + ' stroke' + (strokeCount === 1 ? '' : 's');
+}
+
+// ── SHINE アニメーション状態（NEONSから移植） ────────────────────
+let _3dStep = 0, _3dFrame = 0, _3dSeq = [];
+let _3dRandFade = 'linear', _3dRandStep = -1;
+
+// SHINEシーケンスをshinePatternに従って構築
+function _buildShineSeq() {
+  const allColors = getUsedColors();
+  const n = allColors.length;
+  _3dSeq = [];
+  if (!n) return;
+  if (shinePattern === 1) {
+    allColors.forEach(c => _3dSeq.push(new Set([c])));
+  } else if (shinePattern === 2) {
+    for (let i=0; i<n; i++) _3dSeq.push(new Set([allColors[i], allColors[(i+1)%n]]));
+  } else { // pattern 3
+    allColors.forEach(c => { const s = new Set(allColors); s.delete(c); _3dSeq.push(s); });
+  }
+  _3dStep = 0; _3dFrame = 0;
+}
+
+// fadeCurveをそのまま使用
+function _fade3D(phase, step) {
+  let curve = fadeCurve;
+  if (curve === 'random') {
+    if (step !== _3dRandStep) {
+      const opts = ['linear','none','sin','ease'];
+      _3dRandFade = opts[Math.floor(Math.random() * opts.length)];
+      _3dRandStep = step;
+    }
+    curve = _3dRandFade;
+  }
+  switch(curve) {
+    case 'none':   return phase < 0.5 ? 1 : 0;
+    case 'linear': return 1 - phase;
+    case 'sin':    return Math.sin(phase * Math.PI);
+    case 'ease':   return phase < 0.5 ? 2*phase*phase : 1 - Math.pow(-2*phase+2,2)/2;
+    default:       return 1 - phase;
+  }
+}
+
+function _mul3D(inCur, inNext, phase, step) {
+  const dim = 0.25;
+  if ( inCur &&  inNext) return 0.94;
+  if ( inCur && !inNext) return dim + (0.94 - dim) * Math.max(0, _fade3D(phase, step));
+  if (!inCur &&  inNext) return dim + (0.94 - dim) * Math.max(0, _fade3D(1 - phase, step));
+  return dim;
+}
+
+// flickerSpeedも完全に踏襲（2Dと同じ fpg() 計算）
+function _flicker3D() {
+  const S = _3dSeq.length;
+  if (!S) return;
+  const period  = Math.max(1, Math.round(50 * Math.pow(1 - flickerSpeed / 100, 1.4)));
+  const phase   = _3dFrame / period;
+  const curSet  = _3dSeq[_3dStep];
+  const nextSet = _3dSeq[(_3dStep + 1) % S];
+
+  Object.keys(_flickerGroups3d).forEach(color => {
+    const mul = _mul3D(curSet.has(color), nextSet.has(color), phase, _3dStep);
+    _flickerGroups3d[color].forEach(({ mat, kind, base }) => {
+      if (kind === 'gas')   mat.opacity = base * mul;
+      if (kind === 'glow')  mat.opacity = base * mul;
+      if (kind === 'glass') mat.emissiveIntensity = base * mul;
+    });
+  });
+
+  if (++_3dFrame >= period) {
+    _3dFrame = 0;
+    _3dStep  = (_3dStep + 1) % S;
+  }
+}
+
+// ── レンダラー初期化（初回のみ） ─────────────────────────────────
+function _init3DRenderer() {
+  const canvas3d = document.getElementById('canvas-3d');
+  const overlay  = document.getElementById('view-3d');
+  const W3 = overlay.clientWidth  || window.innerWidth;
+  const H3 = overlay.clientHeight || window.innerHeight;
+
+  _renderer3d = new THREE.WebGLRenderer({ canvas: canvas3d, antialias: true, preserveDrawingBuffer: true });
+  _renderer3d.setPixelRatio(Math.min(devicePixelRatio, 2));
+  _renderer3d.setSize(W3, H3);
+
+  _scene3d  = new THREE.Scene();
+  _camera3d = new THREE.PerspectiveCamera(48, W3 / H3, 0.01, 500);
+  _camera3d.position.set(0, 0, 22);
+
+  // ライティング
+  // キーライト: 真上やや手前 → チューブ上面に細い白ハイライト線
+  const keyLight = new THREE.DirectionalLight(0xffffff, 0.90);
+  keyLight.position.set(2, 12, 8);
+  _scene3d.add(keyLight);
+  // フィルライト: 極めて弱く（暗室のネオンサイン環境）
+  const fillLight = new THREE.DirectionalLight(0x334466, 0.06);
+  fillLight.position.set(-4, -2, 3);
+  _scene3d.add(fillLight);
+  // アンビエント: ほぼゼロ（ガスが唯一の光源に見せる）
+  _scene3d.add(new THREE.AmbientLight(0x020203));
+
+  _controls3d = new THREE.OrbitControls(_camera3d, canvas3d);
+  _controls3d.enableDamping   = true;
+  _controls3d.dampingFactor   = 0.055;
+  _controls3d.autoRotate      = _autoRotate3d;
+  _controls3d.autoRotateSpeed = 0.42;
+  _controls3d.minDistance     = 3;
+  _controls3d.maxDistance     = 60;
+
+  _tubeGroup3d = new THREE.Group();
+  _scene3d.add(_tubeGroup3d);
+
+  window.addEventListener('resize', () => {
+    if (!_3dOpen) return;
+    const w = overlay.clientWidth, h = overlay.clientHeight;
+    _camera3d.aspect = w / h;
+    _camera3d.updateProjectionMatrix();
+    _renderer3d.setSize(w, h);
+  });
+}
+
+// ── レンダーループ ───────────────────────────────────────────────
+function _animate3D() {
+  _3dAnimId = requestAnimationFrame(_animate3D);
+  const t = performance.now() / 1000;
+
+  // 色ごとに異なる速度でZ方向に浮遊 + 微傾き → 視差による立体感
+  Object.entries(_colorGroups3d).forEach(([color, grp]) => {
+    const sp = _colorSpeeds3d[color];
+    if (!sp) return;
+    // Z: 各色が異なる深度でゆっくり前後
+    // 全色 t=0 で z=0・傾き=0（整列）→ 異なるFreqで徐々にズレていく
+    grp.position.z = sp.zAmp   * Math.sin(t * sp.zFreq    * Math.PI * 2);
+    grp.rotation.y = sp.tiltAmp * Math.sin(t * sp.tiltFreq * Math.PI * 2);
+    grp.rotation.x = sp.tiltAmp * 0.45 * Math.sin(t * sp.tiltFreq * 1.4 * Math.PI * 2);
+  });
+
+  _flicker3D();
+  _controls3d.update();
+  _renderer3d.render(_scene3d, _camera3d);
+}
+
+// ── enter3D ─────────────────────────────────────────────────────
+async function enter3D() {
+  if (_3dOpen) return;
+
+  const overlay = document.getElementById('view-3d');
+  const loading = document.getElementById('loading-3d');
+  const btn     = document.getElementById('btn-3d');
+
+  // 他パネルを閉じる
+  inputOpen = false; outputOpen = false; exportOpen = false;
+  ['panel-input','panel-output','panel-export'].forEach(id =>
+    document.getElementById(id).classList.remove('open'));
+  ['btn-input','btn-output','btn-export'].forEach(id =>
+    document.getElementById(id)?.classList.remove('on'));
+
+  if (shining) stopShine();
+
+  overlay.classList.add('open');
+  loading.style.display = 'flex';
+  btn.classList.add('on');
+  _3dOpen = true;
+
+  const ok = await _load3DLibs();
+  if (!ok) {
+    loading.textContent = 'LOAD FAILED — check connection';
+    return;
+  }
+
+  if (!_renderer3d) _init3DRenderer();
+
+  _buildTubes3D();
+  _buildShineSeq();
+  loading.style.display = 'none';
+  _animate3D();
+}
+
+// ── exit3D ──────────────────────────────────────────────────────
+function exit3D() {
+  if (!_3dOpen) return;
+  _3dOpen = false;
+  if (_3dAnimId) { cancelAnimationFrame(_3dAnimId); _3dAnimId = null; }
+  document.getElementById('view-3d').classList.remove('open');
+  document.getElementById('btn-3d').classList.remove('on');
+  if (glowApplied) { redrawAll(true); startShine(); }
+}
+
+// ── 3D エクスポート ───────────────────────────────────────────────
+function export3DStill(type) {
+  // preserveDrawingBuffer: true なので toDataURL() が使える
+  _renderer3d.render(_scene3d, _camera3d);
+  const link = document.createElement('a');
+  const ts   = new Date().toISOString().slice(0,19).replace(/[:T]/g,'-');
+  link.download = 'NEONS_3D_' + ts + '.' + type;
+  link.href     = document.getElementById('canvas-3d').toDataURL(
+    type === 'jpg' ? 'image/jpeg' : 'image/png', 0.95
+  );
+  link.click();
+}
+
+let _3dRecorder = null, _3dChunks = [];
+
+function toggle3DMP4() {
+  const btn = document.getElementById('btn-3d-mp4');
+  if (_3dRecorder && _3dRecorder.state === 'recording') {
+    _3dRecorder.stop();
+    return;
+  }
+  const canvas = document.getElementById('canvas-3d');
+  _3dChunks = [];
+  const mime = ['video/mp4;codecs="avc1"','video/webm;codecs=vp9','video/webm']
+    .find(m => { try { return MediaRecorder.isTypeSupported(m); } catch(e){ return false; }})
+    || 'video/webm';
+  const stream = canvas.captureStream(30);
+  _3dRecorder = new MediaRecorder(stream, { mimeType: mime });
+  _3dRecorder.ondataavailable = e => { if(e.data.size) _3dChunks.push(e.data); };
+  _3dRecorder.onstop = () => {
+    const ext  = mime.includes('mp4') ? 'mp4' : 'webm';
+    const ts   = new Date().toISOString().slice(0,19).replace(/[:T]/g,'-');
+    const blob = new Blob(_3dChunks, { type: mime });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.download = 'NEONS_3D_' + ts + '.' + ext;
+    a.href = url; a.click();
+    URL.revokeObjectURL(url);
+    if (btn) { btn.textContent = '↓ MP4'; btn.classList.remove('on'); }
+    _3dRecorder = null;
+  };
+  _3dRecorder.start();
+  if (btn) { btn.textContent = '● REC'; btn.classList.add('on'); }
+  // export-secパネルの秒数を流用
+  const sec = parseInt(document.getElementById('export-sec')?.value || 3);
+  setTimeout(() => { if (_3dRecorder?.state === 'recording') _3dRecorder.stop(); }, sec * 1000);
+}
+
+function toggle3D() { _3dOpen ? exit3D() : enter3D(); }
+
+function toggle3DAutoRotate() {
+  _autoRotate3d = !_autoRotate3d;
+  if (_controls3d) _controls3d.autoRotate = _autoRotate3d;
+  document.getElementById('autorotate-toggle').classList.toggle('on', _autoRotate3d);
+}
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && _3dOpen) exit3D();
+});
 </script>
 </body>
 </html>

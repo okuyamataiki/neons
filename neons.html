@@ -361,6 +361,41 @@ input[type=range]::-webkit-slider-thumb {
 #autorotate-toggle.on { border-color: rgba(255,255,255,0.45); color: rgba(255,255,255,0.8); }
 #autorotate-toggle:hover { border-color: rgba(255,255,255,0.35); color: rgba(255,255,255,0.7); }
 
+/* モーションコントロール */
+#motion-ctrl {
+  position: absolute; bottom: 18px; right: 16px; z-index: 10;
+  display: flex; flex-direction: column; align-items: flex-end; gap: 7px;
+}
+#motion-mode { display: flex; gap: 5px; }
+.mot-btn {
+  background: rgba(0,0,0,0.65);
+  border: 0.5px solid rgba(255,255,255,0.14); border-radius: 2px;
+  color: rgba(255,255,255,0.32); cursor: pointer;
+  font-family: 'Space Mono', monospace; font-size: 7px;
+  letter-spacing: 0.14em; padding: 5px 9px;
+  transition: border-color 0.12s, color 0.12s;
+}
+.mot-btn:hover { border-color: rgba(255,255,255,0.35); color: rgba(255,255,255,0.8); }
+.mot-btn.active { border-color: rgba(255,255,255,0.55); color: rgba(255,255,255,0.9); }
+#motion-speed {
+  display: flex; align-items: center; gap: 7px;
+  background: rgba(0,0,0,0.65);
+  border: 0.5px solid rgba(255,255,255,0.14); border-radius: 2px;
+  padding: 5px 9px;
+}
+.mot-lbl {
+  font-family: 'Space Mono', monospace; font-size: 7px;
+  letter-spacing: 0.14em; color: rgba(255,255,255,0.32);
+}
+#motion-spd-slider {
+  -webkit-appearance: none; width: 72px; height: 2px;
+  background: rgba(255,255,255,0.18); outline: none; cursor: pointer;
+}
+#motion-spd-slider::-webkit-slider-thumb {
+  -webkit-appearance: none; width: 12px; height: 12px;
+  border-radius: 50%; background: rgba(255,255,255,0.65); cursor: pointer;
+}
+
 /* 3D エクスポートボタン群 */
 #export-3d {
   position: absolute; top: 58px; right: 16px; z-index: 10;
@@ -712,13 +747,20 @@ select option { background: #111; }
     <button class="exp3d-btn" onclick="export3DStill('png')">↓ PNG</button>
     <button class="exp3d-btn" id="btn-3d-mp4" onclick="toggle3DMP4()">↓ MP4</button>
   </div>
+  <!-- モーションコントロール（左下） -->
+  <div id="motion-ctrl">
+    <div id="motion-mode">
+      <button class="mot-btn active" id="mot-0" onclick="set3DMotion(0)">STILL</button>
+      <button class="mot-btn" id="mot-1" onclick="set3DMotion(1)">DRIFT</button>
+      <button class="mot-btn" id="mot-2" onclick="set3DMotion(2)">SPIN</button>
+    </div>
+    <div id="motion-speed">
+      <span class="mot-lbl">SPD</span>
+      <input type="range" id="motion-spd-slider" min="1" max="100" value="40"
+        oninput="_3dSpeedMul = +this.value / 40">
+    </div>
+  </div>
   <div id="hint-3d">drag — orbit &nbsp;·&nbsp; scroll — zoom &nbsp;·&nbsp; Esc — exit</div>
-  <button id="autorotate-toggle" class="on" onclick="toggle3DAutoRotate()" title="Auto-rotate">
-    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">
-      <path d="M2 7a5 5 0 1 1 1.5 3.5"/>
-      <polyline points="2,10.5 2,7 5.5,7"/>
-    </svg>
-  </button>
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/gif.js/0.2.0/gif.js"></script>
@@ -2044,23 +2086,59 @@ function _init3DRenderer() {
 }
 
 // ── レンダーループ ───────────────────────────────────────────────
+// ── モーションモード ─────────────────────────────────────────────
+// 0: STILL（個別動きなし、全体オービットのみ）
+// 1: DRIFT（全体オービット＋個別Z浮遊・傾き）
+// 2: SPIN （全体オービット＋個別Y軸回転）
+let _3dMotionMode = 1;   // デフォルト: DRIFT
+let _3dSpeedMul   = 1.0; // スピード倍率（スライダーで変更）
+
+function set3DMotion(mode) {
+  _3dMotionMode = mode;
+  document.querySelectorAll('.mot-btn').forEach((b, i) => {
+    b.classList.toggle('active', i === mode);
+  });
+  // STILL以外はオービット継続、STILLでも手動ドラッグは効く
+  if (_controls3d) {
+    _controls3d.autoRotate      = (mode !== 0);
+    _controls3d.autoRotateSpeed = 0.42 * _3dSpeedMul;
+  }
+  // グループの変換をリセット（モード切替時に整列に戻す）
+  Object.values(_colorGroups3d).forEach(grp => {
+    grp.position.set(0, 0, 0);
+    grp.rotation.set(0, 0, 0);
+  });
+}
+
 function _animate3D() {
   _3dAnimId = requestAnimationFrame(_animate3D);
-  const t = performance.now() / 1000;
+  const t = performance.now() / 1000 * _3dSpeedMul;
 
-  // 色ごとに異なる速度でZ方向に浮遊 + 微傾き → 視差による立体感
-  Object.entries(_colorGroups3d).forEach(([color, grp]) => {
-    const sp = _colorSpeeds3d[color];
-    if (!sp) return;
-    // Z: 各色が異なる深度でゆっくり前後
-    // 全色 t=0 で z=0・傾き=0（整列）→ 異なるFreqで徐々にズレていく
-    grp.position.z = sp.zAmp   * Math.sin(t * sp.zFreq    * Math.PI * 2);
-    grp.rotation.y = sp.tiltAmp * Math.sin(t * sp.tiltFreq * Math.PI * 2);
-    grp.rotation.x = sp.tiltAmp * 0.45 * Math.sin(t * sp.tiltFreq * 1.4 * Math.PI * 2);
-  });
+  if (_3dMotionMode === 1) {
+    // DRIFT: Z前後浮遊 + XY微傾き
+    Object.entries(_colorGroups3d).forEach(([color, grp]) => {
+      const sp = _colorSpeeds3d[color];
+      if (!sp) return;
+      grp.position.z = sp.zAmp    * Math.sin(t * sp.zFreq    * Math.PI * 2);
+      grp.rotation.y = sp.tiltAmp * Math.sin(t * sp.tiltFreq * Math.PI * 2);
+      grp.rotation.x = sp.tiltAmp * 0.45 * Math.sin(t * sp.tiltFreq * 1.4 * Math.PI * 2);
+    });
+  } else if (_3dMotionMode === 2) {
+    // SPIN: 色ごとに異なる速度でY軸回転
+    Object.entries(_colorGroups3d).forEach(([color, grp]) => {
+      const sp = _colorSpeeds3d[color];
+      if (!sp) return;
+      grp.rotation.y = t * sp.zFreq * Math.PI * 2;         // 一方向回転
+      grp.rotation.x = sp.tiltAmp * Math.sin(t * sp.tiltFreq * Math.PI * 2);
+    });
+  }
+  // STILL: グループ変換なし（リセット済み）
 
+  if (_controls3d) {
+    _controls3d.autoRotateSpeed = 0.42 * _3dSpeedMul;
+    _controls3d.update();
+  }
   _flicker3D();
-  _controls3d.update();
   _renderer3d.render(_scene3d, _camera3d);
 }
 
@@ -2096,6 +2174,11 @@ async function enter3D() {
 
   _buildTubes3D();
   _buildShineSeq();
+  // モードボタンの初期表示を同期
+  document.querySelectorAll('.mot-btn').forEach((b, i) => {
+    b.classList.toggle('active', i === _3dMotionMode);
+  });
+  if (_controls3d) _controls3d.autoRotate = (_3dMotionMode !== 0);
   loading.style.display = 'none';
   _animate3D();
 }
@@ -2161,9 +2244,8 @@ function toggle3DMP4() {
 function toggle3D() { _3dOpen ? exit3D() : enter3D(); }
 
 function toggle3DAutoRotate() {
-  _autoRotate3d = !_autoRotate3d;
-  if (_controls3d) _controls3d.autoRotate = _autoRotate3d;
-  document.getElementById('autorotate-toggle').classList.toggle('on', _autoRotate3d);
+  // 後方互換（旧ボタンが残っていた場合用）
+  set3DMotion(_3dMotionMode === 0 ? 1 : 0);
 }
 
 document.addEventListener('keydown', e => {

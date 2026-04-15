@@ -1779,62 +1779,78 @@ function _toV3(x, y, cw, ch) {
 }
 
 // ── 共有リソース ─────────────────────────────────────────────────
-let _capGeo = null;     // 端キャップ用高解像度球体
 let _colorGroups3d = {};
 let _colorSpeeds3d = {};
 
-// 球体キャップを端点に配置（方向不要・常に安定）
-function _addCap(grp, mat, pt, r) {
-  if (!_capGeo) _capGeo = new THREE.SphereGeometry(1, 20, 14);
-  const cap = new THREE.Mesh(_capGeo, mat);
-  cap.scale.setScalar(r);
-  cap.position.copy(pt);
-  grp.add(cap);
-}
-
-// ── L1: ガス柱 ───────────────────────────────────────────────────
-function _addGasRod(grp, curve, segs, r, color) {
-  const geo = new THREE.TubeGeometry(curve, segs, r, 16, false);
-  const mat = new THREE.MeshBasicMaterial({
-    color: new THREE.Color(color), transparent: true, opacity: 0.94, depthWrite: false,
-  });
-  grp.add(new THREE.Mesh(geo, mat));
-  _addCap(grp, mat, curve.getPoint(0), r);
-  _addCap(grp, mat, curve.getPoint(1), r);
-  return mat;
-}
-
-// ── L2: ガラス管 ─────────────────────────────────────────────────
-function _addGlassTube(grp, curve, segs, r, color) {
-  const geo = new THREE.TubeGeometry(curve, segs, r * 1.04, 18, false);
+// ── 発光樹脂ロッド（端キャップ: 球体をr*0.45 インセット） ─────────
+// インセットにより外側に出るドームは 0.55r だけ → 自然な丸み、ロッド一体感
+function _buildResinRod(grp, curve, segs, r, color) {
+  const c   = new THREE.Color(color);
   const mat = new THREE.MeshPhongMaterial({
-    color:             new THREE.Color(0x000000),
-    emissive:          new THREE.Color(color),
-    emissiveIntensity: 0.06,
-    transparent:       true, opacity: 0.08,
-    shininess:         640, specular: new THREE.Color(0xffffff),
-    depthWrite:        false, side: THREE.FrontSide,
+    color:             c.clone().multiplyScalar(0.55),
+    emissive:          c.clone(),
+    emissiveIntensity: 0.78,
+    shininess:         18,
+    specular:          new THREE.Color(0x303030),
+    depthWrite:        true,
   });
-  grp.add(new THREE.Mesh(geo, mat));
-  _addCap(grp, mat, curve.getPoint(0), r * 1.04);
-  _addCap(grp, mat, curve.getPoint(1), r * 1.04);
+  grp.add(new THREE.Mesh(new THREE.TubeGeometry(curve, segs, r, 20, false), mat));
+
+  // 球体をチューブ内側に r*0.45 押し込む
+  // → 内側半球はロッドに隠蔽、外側に出る 0.55r 分だけが丸みとして見える
+  const capGeo   = new THREE.SphereGeometry(r, 22, 16);
+  const startPos = curve.getPoint(0).clone()
+                       .addScaledVector(curve.getTangent(0).normalize(),  r * 0.45);
+  const endPos   = curve.getPoint(1).clone()
+                       .addScaledVector(curve.getTangent(1).normalize(), -r * 0.45);
+  [startPos, endPos].forEach(pt => {
+    const cap = new THREE.Mesh(capGeo, mat);
+    cap.position.copy(pt);
+    grp.add(cap);
+  });
   return mat;
 }
 
-// ── L3–5: グローハロー ────────────────────────────────────────────
-function _addGlowHalo(grp, curve, segs, r, color, opacity, radSeg, startPt, endPt) {
-  const geo = new THREE.TubeGeometry(curve, segs, r, radSeg, false);
-  const mat = new THREE.MeshBasicMaterial({
-    color: new THREE.Color(color), transparent: true, opacity,
-    blending: THREE.AdditiveBlending, depthWrite: false,
-  });
-  grp.add(new THREE.Mesh(geo, mat));
-  _addCap(grp, mat, startPt, r);
-  _addCap(grp, mat, endPt, r);
-  return mat;
+// ── グロー層（同心チューブ + depthTest:false） ─────────────────────
+// depthTest:false → ロッド側面でも常に描画、全体をグロー
+// 14層 × ガウシアン減衰 → 個別の輪が視認できない滑らかなハロー
+function _buildGlowLayers(grp, curve, segs, r, color, startPt, endPt) {
+  const N      = 14;
+  const glowMaxR = r * 5.0;
+  const mats   = [];
+
+  for (let i = 0; i < N; i++) {
+    const t  = i / (N - 1);
+    const lr = r + (glowMaxR - r) * t;            // r → r*5.0 線形
+    const lo = 0.14 * Math.exp(-2.8 * t * t);     // ガウシアン: 中心濃く外縁薄く
+    const rs = i < 6 ? 10 : i < 10 ? 7 : 5;       // 外層ほど粗いポリゴンでOK
+
+    const geo = new THREE.TubeGeometry(curve, Math.min(segs, 120), lr, rs, false);
+    const mat = new THREE.MeshBasicMaterial({
+      color:       new THREE.Color(color),
+      transparent: true,
+      opacity:     lo,
+      blending:    THREE.AdditiveBlending,
+      depthWrite:  false,
+      depthTest:   false,     // ← ロッド側面でも常に描画
+      side:        THREE.FrontSide,
+    });
+    grp.add(new THREE.Mesh(geo, mat));
+
+    // 球体端キャップ（グロー層も丸く終わらせる）
+    const capGeo = new THREE.SphereGeometry(lr, rs, Math.max(4, rs - 2));
+    [startPt, endPt].forEach(pt => {
+      const cap = new THREE.Mesh(capGeo, mat);
+      cap.position.copy(pt);
+      grp.add(cap);
+    });
+
+    mats.push({ mat, base: lo });
+  }
+  return mats;
 }
 
-// ── 全ストロークをチューブ化（5層構成） ─────────────────────────
+// ── 全ストロークをチューブ化 ─────────────────────────────────────
 function _buildTubes3D() {
   _tubeGroup3d.traverse(c => {
     if (c.isMesh) { c.geometry?.dispose(); c.material?.dispose(); }
@@ -1843,8 +1859,6 @@ function _buildTubes3D() {
   _flickerGroups3d = {};
   _colorGroups3d   = {};
   _colorSpeeds3d   = {};
-
-  _capGeo = null;
 
   _scene3d.background = new THREE.Color(bgColor);
 
@@ -1859,10 +1873,10 @@ function _buildTubes3D() {
     _tubeGroup3d.add(grp);
     _colorGroups3d[color] = grp;
     _colorSpeeds3d[color] = {
-      zAmp:     0.6 + ci * 0.55,
-      zFreq:    0.04 + ci * 0.025,   // 色ごとに異なるスピード → ここだけで徐々にズレる
-      tiltAmp:  0.03 + ci * 0.012,
-      tiltFreq: 0.025 + ci * 0.018,
+      zAmp:     0.5 + ci * 0.45,
+      zFreq:    0.04 + ci * 0.025,
+      tiltAmp:  0.025 + ci * 0.010,
+      tiltFreq: 0.022 + ci * 0.015,
     };
   });
 
@@ -1884,29 +1898,21 @@ function _buildTubes3D() {
       const pts3  = samp.map(p => _toV3(p.x, p.y, W, H));
       const curve = new THREE.CatmullRomCurve3(pts3, false, 'catmullrom', 0.5);
       const segs  = Math.min(480, samp.length * 2);
-      const r     = Math.max(0.07, (size * 0.5 / W) * SCENE_W_3D * 2.0);
+      const r     = Math.max(0.07, (size * 0.5 / W) * SCENE_W_3D * 1.85);
       const startPt = pts3[0];
       const endPt   = pts3[pts3.length - 1];
 
       if (!_flickerGroups3d[color]) _flickerGroups3d[color] = [];
 
-      // L1: ガス柱（純色・実体）
-      const m1 = _addGasRod(grp, curve, segs, r, color);
-      _flickerGroups3d[color].push({ mat: m1, kind: 'gas', base: 0.94 });
+      // ロッド本体
+      const m1 = _buildResinRod(grp, curve, segs, r, color);
+      _flickerGroups3d[color].push({ mat: m1, kind: 'resin', base: { opacity: 0.97, emissive: 0.78 } });
 
-      // L2: ガラス管（薄壁・高shininess）
-      const m2 = _addGlassTube(grp, curve, segs, r, color);
-      _flickerGroups3d[color].push({ mat: m2, kind: 'glass', base: 0.06 });
-
-      // L3–L5: グローハロー
-      const m3 = _addGlowHalo(grp, curve, segs, r * 1.55, color, 0.22, 9, startPt, endPt);
-      _flickerGroups3d[color].push({ mat: m3, kind: 'glow', base: 0.22 });
-
-      const m4 = _addGlowHalo(grp, curve, segs, r * 2.8,  color, 0.07, 7, startPt, endPt);
-      _flickerGroups3d[color].push({ mat: m4, kind: 'glow', base: 0.07 });
-
-      const m5 = _addGlowHalo(grp, curve, segs, r * 5.0,  color, 0.022, 5, startPt, endPt);
-      _flickerGroups3d[color].push({ mat: m5, kind: 'glow', base: 0.022 });
+      // グロー層
+      const glowMats = _buildGlowLayers(grp, curve, segs, r, color, startPt, endPt);
+      glowMats.forEach(({ mat, base }) => {
+        _flickerGroups3d[color].push({ mat, kind: 'glow', base });
+      });
 
       strokeCount++;
     });
@@ -1976,9 +1982,11 @@ function _flicker3D() {
   Object.keys(_flickerGroups3d).forEach(color => {
     const mul = _mul3D(curSet.has(color), nextSet.has(color), phase, _3dStep);
     _flickerGroups3d[color].forEach(({ mat, kind, base }) => {
-      if (kind === 'gas')   mat.opacity = base * mul;
-      if (kind === 'glow')  mat.opacity = base * mul;
-      if (kind === 'glass') mat.emissiveIntensity = base * mul;
+      if (kind === 'resin') {
+        mat.opacity           = base.opacity  * mul;
+        mat.emissiveIntensity = base.emissive * mul;
+      }
+      if (kind === 'glow') mat.opacity = base * mul;
     });
   });
 
@@ -2003,17 +2011,17 @@ function _init3DRenderer() {
   _camera3d = new THREE.PerspectiveCamera(48, W3 / H3, 0.01, 500);
   _camera3d.position.set(0, 0, 22);
 
-  // ライティング
-  // キーライト: 真上やや手前 → チューブ上面に細い白ハイライト線
-  const keyLight = new THREE.DirectionalLight(0xffffff, 0.90);
-  keyLight.position.set(2, 12, 8);
+  // ライティング（LEDネオン樹脂ロッド向け）
+  // キーライト: 上45°やや手前 → 艶コートの光沢ハイライトが走る
+  const keyLight = new THREE.DirectionalLight(0xffffff, 0.70);
+  keyLight.position.set(3, 10, 7);
   _scene3d.add(keyLight);
-  // フィルライト: 極めて弱く（暗室のネオンサイン環境）
-  const fillLight = new THREE.DirectionalLight(0x334466, 0.06);
-  fillLight.position.set(-4, -2, 3);
-  _scene3d.add(fillLight);
-  // アンビエント: ほぼゼロ（ガスが唯一の光源に見せる）
-  _scene3d.add(new THREE.AmbientLight(0x020203));
+  // リムライト: 斜め後ろ → ロッドの輪郭を立てる
+  const rimLight = new THREE.DirectionalLight(0xffffff, 0.20);
+  rimLight.position.set(-6, 3, -5);
+  _scene3d.add(rimLight);
+  // アンビエント: ごく薄く（暗所に設置されたLEDネオン）
+  _scene3d.add(new THREE.AmbientLight(0x080810));
 
   _controls3d = new THREE.OrbitControls(_camera3d, canvas3d);
   _controls3d.enableDamping   = true;

@@ -753,6 +753,7 @@ select option { background: #111; }
       <button class="mot-btn active" id="mot-0" onclick="set3DMotion(0)">STILL</button>
       <button class="mot-btn" id="mot-1" onclick="set3DMotion(1)">DRIFT</button>
       <button class="mot-btn" id="mot-2" onclick="set3DMotion(2)">SPIN</button>
+      <button class="mot-btn" id="mot-3" onclick="set3DMotion(3)">RANDOM</button>
     </div>
     <div id="motion-speed">
       <span class="mot-lbl">SPD</span>
@@ -1824,6 +1825,14 @@ function _toV3(x, y, cw, ch) {
 let _colorGroups3d = {};
 let _colorSpeeds3d = {};
 
+// カラー投影ライト用グローバル
+const MAX_PROJ_LIGHTS = 32;              // 最大ライト数（ストローク × 4サンプル）
+let _projStrokeSamples = [];             // [{positions:[V3], color:Color}]
+let _wetMats3d         = [];             // 全wetマテリアルへの参照
+// 毎フレーム更新用Float32Array（new Arrayを避けてGCゼロ）
+const _projPosArr = new Float32Array(MAX_PROJ_LIGHTS * 3);
+const _projColArr = new Float32Array(MAX_PROJ_LIGHTS * 3);
+
 // ── ① 点列スムージング（ラプラシアン） ────────────────────────────
 // 描線の手ブレを除去して滑らかな曲線にする
 // iterations回、各点を隣接点の平均に近づける（端点は固定）
@@ -1940,19 +1949,25 @@ function _buildTubeWithCaps(curve, tubeSeg, r, radSeg, capSegs) {
 }
 
 // ── ③ ぬめっと光沢 ShaderMaterial ────────────────────────────────
-function _makeWetMat(color) {
+function _makeWetMat(color, stencilRef) {
   const c = new THREE.Color(color);
   return new THREE.ShaderMaterial({
     uniforms: {
-      uColor:    { value: new THREE.Vector3(c.r, c.g, c.b) },
-      uEmissive: { value: 1.0 },
+      uColor:     { value: new THREE.Vector3(c.r, c.g, c.b) },
+      uEmissive:  { value: 1.0 },
+      uProjPos:   { value: Array.from({length: MAX_PROJ_LIGHTS}, () => new THREE.Vector3()) },
+      uProjCol:   { value: Array.from({length: MAX_PROJ_LIGHTS}, () => new THREE.Vector3()) },
+      uProjCount: { value: 0 },
     },
     vertexShader: `
       varying vec3 vNormal;
       varying vec3 vViewDir;
       varying vec3 vWorldNormal;
+      varying vec3 vWorldPos;
       void main() {
-        vec4 mvPos    = modelViewMatrix * vec4(position, 1.0);
+        vec4 worldPos = modelMatrix * vec4(position, 1.0);
+        vWorldPos     = worldPos.xyz;
+        vec4 mvPos    = viewMatrix * worldPos;
         vNormal       = normalize(normalMatrix * normal);
         vViewDir      = normalize(-mvPos.xyz);
         vWorldNormal  = normalize((modelMatrix * vec4(normal, 0.0)).xyz);
@@ -1960,11 +1975,16 @@ function _makeWetMat(color) {
       }
     `,
     fragmentShader: `
+      #define MAX_PROJ_LIGHTS 32
       uniform vec3  uColor;
       uniform float uEmissive;
+      uniform vec3  uProjPos[MAX_PROJ_LIGHTS];
+      uniform vec3  uProjCol[MAX_PROJ_LIGHTS];
+      uniform int   uProjCount;
       varying vec3  vNormal;
       varying vec3  vViewDir;
       varying vec3  vWorldNormal;
+      varying vec3  vWorldPos;
 
       // Wrap lighting: シリコンのソフトな拡散光（NVIDIAのSSS近似手法）
       // wrap=0.5でライトが側面・背面まで回り込む
@@ -1996,15 +2016,26 @@ function _makeWetMat(color) {
         float wrap1 = wrapDiff(N, L1, 0.45);
         float wrap2 = wrapDiff(N, L2, 0.3) * 0.25;
 
-        // ── 消灯状態: 暗い色付き樹脂（LEDオフ、外光のみ） ──────────
+        // ── 消灯状態: 暗い色付き樹脂 + 近くの点灯ストロークから色投影 ──
         float ambDiff = 0.10 + diff1 * 0.18 + diff2 * 0.06;
         vec3 colOff = uColor * ambDiff;
 
+        // 点灯ストロークからの色投影（距離減衰）
+        vec3 projLight = vec3(0.0);
+        for (int i = 0; i < MAX_PROJ_LIGHTS; i++) {
+          float lightOn = step(float(i) + 0.5, float(uProjCount));
+          float d      = distance(vWorldPos, uProjPos[i]);
+          float att    = max(0.0, 1.0 - d / 3.5);
+          att = att * att;
+          projLight += uProjCol[i] * att * lightOn * 0.18;
+        }
+        colOff += projLight;
+
         // ── 点灯状態: LED発光 + SSS + 飽和色 ────────────────────────
         float edgeGlow  = pow(1.0 - clamp(dot(N, V), 0.0, 1.0), 1.5) * 0.4;
-        float lightSum  = uEmissive * 0.90
-                        + (diff1 + diff2) * 0.18
-                        + (wrap1 + wrap2) * 0.10
+        float lightSum  = uEmissive * 0.45
+                        + (diff1 + diff2) * 0.82
+                        + (wrap1 + wrap2) * 0.50
                         + edgeGlow * uEmissive;
 
         // 点灯時の彩度ブースト: uColorを飽和方向に押す
@@ -2030,9 +2061,12 @@ function _makeWetMat(color) {
         gl_FragColor = vec4(col, 1.0);
       }
     `,
-    transparent: false,
-    depthWrite:  true,
-    side:        THREE.FrontSide,
+    transparent:         false,
+    depthWrite:          true,
+    side:                THREE.FrontSide,
+    polygonOffset:       true,
+    polygonOffsetFactor: -1,
+    polygonOffsetUnits:  -1,
   });
 }
 
@@ -2115,11 +2149,13 @@ function _buildGlowLayers(grp, curve, segs, r, color) {
   const nBills = Math.min(segs, 120);
   const geo    = _buildBillboardGlowGeo(curve, nBills);
 
-  // 輝度の逆数でpeakを補正 → 白・黄など明るい色が飛びすぎず全色均等に見える
-  const c   = new THREE.Color(color);
-  const lum = c.r * 0.299 + c.g * 0.587 + c.b * 0.114;
+  // 輝度の逆数 + 半径の逆数でpeakを補正
+  // → 明るい色・太い線が飛びすぎず全色・全サイズで均等に見える
+  const c      = new THREE.Color(color);
+  const lum    = c.r * 0.299 + c.g * 0.587 + c.b * 0.114;
+  const refR   = 0.15; // 基準半径
   const basePeak = 0.022;
-  const peak = basePeak / Math.max(0.25, lum * 1.4);
+  const peak   = basePeak * (refR / Math.max(0.05, r)) / Math.max(0.25, lum * 1.4);
 
   const mat  = _makeBillboardGlowShader(color, peak);
   mat.uniforms.uGlowR.value = glowR;
@@ -2133,9 +2169,11 @@ function _buildTubes3D() {
     if (c.isMesh) { c.geometry?.dispose(); c.material?.dispose(); }
   });
   _tubeGroup3d.clear();
-  _flickerGroups3d = {};
-  _colorGroups3d   = {};
-  _colorSpeeds3d   = {};
+  _flickerGroups3d   = {};
+  _colorGroups3d     = {};
+  _colorSpeeds3d     = {};
+  _projStrokeSamples = [];
+  _wetMats3d         = [];
 
   _scene3d.background = new THREE.Color(bgColor);
 
@@ -2154,6 +2192,13 @@ function _buildTubes3D() {
       zFreq:    0.04 + ci * 0.025,
       tiltAmp:  0.025 + ci * 0.010,
       tiltFreq: 0.022 + ci * 0.015,
+      // RANDOM モード用: XY面内のランダム回転軸 + ランダム方向
+      randomAxis: new THREE.Vector3(
+        Math.random() * 2 - 1,
+        Math.random() * 2 - 1,
+        Math.random() * 2 - 1
+      ).normalize(),
+      randomDir: Math.random() < 0.5 ? 1 : -1,
     };
   });
 
@@ -2176,23 +2221,42 @@ function _buildTubes3D() {
       // ② 3D座標変換
       let pts3 = samp.map(p => _toV3(p.x, p.y, W, H));
 
+      // ストロークごとにZオフセットを与えて物理的に前後分離 → 自然な立体交差
+      // 黄金比分布: 連続する2ストロークが同じZにならず均等に分散する
+      const zSpread = 2.0; // 全体のZ幅（世界座標）
+      const zOffset = ((strokeCount * 0.618033988) % 1.0 - 0.5) * zSpread;
+      pts3 = pts3.map(p => new THREE.Vector3(p.x, p.y, p.z + zOffset));
+
       // ① スムージング
-      pts3 = _smoothPoints(pts3, 8);
+      pts3 = _smoothPoints(pts3, 14);
 
       // ② 等弧長リサンプリング → 直径を均一に保つ
       const roughCurve = new THREE.CatmullRomCurve3(pts3, false, 'catmullrom', 0.5);
-      const evenPts    = roughCurve.getSpacedPoints(Math.min(240, samp.length * 2));
-      const curve      = new THREE.CatmullRomCurve3(evenPts, false, 'catmullrom', 0.5);
-      const segs  = Math.min(480, samp.length * 3); // ×3でさらに滑らかに
+      const evenPts    = roughCurve.getSpacedPoints(Math.min(300, samp.length * 3));
+      // リサンプル後にも追加スムージング → 残存する急角度・フレーム捩れを除去
+      const smoothedPts = _smoothPoints(evenPts, 6);
+      const curve      = new THREE.CatmullRomCurve3(smoothedPts, false, 'centripetal', 0.5);
+      const segs  = Math.min(600, samp.length * 3);
       const r     = Math.max(0.07, (size * 0.5 / W) * SCENE_W_3D * 1.85);
 
       if (!_flickerGroups3d[color]) _flickerGroups3d[color] = [];
 
       // ④ ロッド本体（テーパーチューブ + ぬめっとシェーダー）
-      const mat1 = _makeWetMat(color);
-      const geo1 = _buildTubeWithCaps(curve, segs, r, 20, 24);
+      const mat1 = _makeWetMat(color, usedColors.indexOf(color) + 1);
+      const sRef = usedColors.indexOf(color) + 1;
+      mat1.stencilWrite = true;
+      mat1.stencilRef   = sRef;
+      mat1.stencilFunc  = THREE.NotEqualStencilFunc;
+      mat1.stencilZPass = THREE.ReplaceStencilOp;
+      const geo1 = _buildTubeWithCaps(curve, segs, r, 36, 24);
       grp.add(new THREE.Mesh(geo1, mat1));
       _flickerGroups3d[color].push({ mat: mat1, kind: 'wet', base: 1.0 });
+
+      // 投影ライト用: このストロークの4サンプル点を記録
+      const samplePositions = [0.1, 0.35, 0.65, 0.9].map(t => curve.getPoint(t));
+      const sc = new THREE.Color(color);
+      _projStrokeSamples.push({ positions: samplePositions, color: sc, colorKey: color });
+      _wetMats3d.push({ mat: mat1, colorKey: color });
 
       // ⑤ グロー層
       const glowMats = _buildGlowLayers(grp, curve, segs, r, color);
@@ -2265,11 +2329,38 @@ function _flicker3D() {
   const curSet  = _3dSeq[_3dStep];
   const nextSet = _3dSeq[(_3dStep + 1) % S];
 
+  // 点灯中ストロークのサンプル位置・色を収集してライトuniformを更新
+  let projCount = 0;
+  _projStrokeSamples.forEach(({ positions, color: sc, colorKey }) => {
+    const mul = _mul3D(curSet.has(colorKey), nextSet.has(colorKey), phase, _3dStep);
+    const t   = Math.max(0, (mul - 0.25) / 0.75);
+    if (t > 0.1) { // 点灯中のみライトとして寄与
+      positions.forEach(pos => {
+        if (projCount < MAX_PROJ_LIGHTS) {
+          _projPosArr[projCount*3]   = pos.x;
+          _projPosArr[projCount*3+1] = pos.y;
+          _projPosArr[projCount*3+2] = pos.z;
+          _projColArr[projCount*3]   = sc.r * t;
+          _projColArr[projCount*3+1] = sc.g * t;
+          _projColArr[projCount*3+2] = sc.b * t;
+          projCount++;
+        }
+      });
+    }
+  });
+  // 全wetマテリアルにライトを適用
+  _wetMats3d.forEach(({ mat }) => {
+    for (let i = 0; i < projCount; i++) {
+      mat.uniforms.uProjPos.value[i].set(_projPosArr[i*3], _projPosArr[i*3+1], _projPosArr[i*3+2]);
+      mat.uniforms.uProjCol.value[i].set(_projColArr[i*3], _projColArr[i*3+1], _projColArr[i*3+2]);
+    }
+    mat.uniforms.uProjCount.value = projCount;
+  });
+
   Object.keys(_flickerGroups3d).forEach(color => {
     const mul = _mul3D(curSet.has(color), nextSet.has(color), phase, _3dStep);
     _flickerGroups3d[color].forEach(({ mat, kind, base }) => {
       if (kind === 'wet') {
-        // 消灯: uEmissive→0.05（暗い樹脂のみ）、点灯: 1.0（フル発光）
         const t = Math.max(0, (mul - 0.25) / 0.75);
         mat.uniforms.uEmissive.value = 0.05 + 0.95 * t;
       }
@@ -2296,7 +2387,7 @@ function _init3DRenderer() {
   const W3 = overlay.clientWidth  || window.innerWidth;
   const H3 = overlay.clientHeight || window.innerHeight;
 
-  _renderer3d = new THREE.WebGLRenderer({ canvas: canvas3d, antialias: true, preserveDrawingBuffer: true });
+  _renderer3d = new THREE.WebGLRenderer({ canvas: canvas3d, antialias: true, preserveDrawingBuffer: true, stencil: true });
   _renderer3d.setPixelRatio(Math.min(devicePixelRatio, 2));
   _renderer3d.setSize(W3, H3);
 
@@ -2341,15 +2432,16 @@ function set3DMotion(mode) {
   document.querySelectorAll('.mot-btn').forEach((b, i) => {
     b.classList.toggle('active', i === mode);
   });
-  // STILL以外はオービット継続、STILLでも手動ドラッグは効く
+  // STILL以外はオービット継続
   if (_controls3d) {
     _controls3d.autoRotate      = (mode !== 0);
     _controls3d.autoRotateSpeed = 0.42 * _3dSpeedMul;
   }
-  // グループの変換をリセット（モード切替時に整列に戻す）
+  // グループ変換リセット（RANDOMはquaternion使用のためrotationもリセット）
   Object.values(_colorGroups3d).forEach(grp => {
     grp.position.set(0, 0, 0);
     grp.rotation.set(0, 0, 0);
+    grp.quaternion.identity();
   });
 }
 
@@ -2371,17 +2463,26 @@ function _animate3D() {
     Object.entries(_colorGroups3d).forEach(([color, grp]) => {
       const sp = _colorSpeeds3d[color];
       if (!sp) return;
-      grp.rotation.y = t * sp.zFreq * Math.PI * 2;         // 一方向回転
+      grp.rotation.y = t * sp.zFreq * Math.PI * 2;
       grp.rotation.x = sp.tiltAmp * Math.sin(t * sp.tiltFreq * Math.PI * 2);
     });
+  } else if (_3dMotionMode === 3) {
+    // RANDOM: XY軸ランダム方向・均等スピードで回転
+    const baseSpeed = 0.5; // 全色共通のスピード（_3dSpeedMulで調整済みのtを使用）
+    Object.entries(_colorGroups3d).forEach(([color, grp]) => {
+      const sp = _colorSpeeds3d[color];
+      if (!sp) return;
+      const angle = t * baseSpeed * sp.randomDir;
+      grp.quaternion.setFromAxisAngle(sp.randomAxis, angle);
+    });
   }
-  // STILL: グループ変換なし（リセット済み）
 
   if (_controls3d) {
     _controls3d.autoRotateSpeed = 0.42 * _3dSpeedMul;
     _controls3d.update();
   }
   _flicker3D();
+  _renderer3d.clearStencil(); // 毎フレームステンシルをリセット
   _renderer3d.render(_scene3d, _camera3d);
 }
 

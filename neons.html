@@ -1824,75 +1824,310 @@ function _toV3(x, y, cw, ch) {
 let _colorGroups3d = {};
 let _colorSpeeds3d = {};
 
-// ── 発光樹脂ロッド（端キャップ: 球体をr*0.45 インセット） ─────────
-// インセットにより外側に出るドームは 0.55r だけ → 自然な丸み、ロッド一体感
-function _buildResinRod(grp, curve, segs, r, color) {
-  const c   = new THREE.Color(color);
-  const mat = new THREE.MeshPhongMaterial({
-    color:             c.clone().multiplyScalar(0.55),
-    emissive:          c.clone(),
-    emissiveIntensity: 0.78,
-    shininess:         18,
-    specular:          new THREE.Color(0x303030),
-    depthWrite:        true,
-  });
-  grp.add(new THREE.Mesh(new THREE.TubeGeometry(curve, segs, r, 20, false), mat));
-
-  // 球体をチューブ内側に r*0.45 押し込む
-  // → 内側半球はロッドに隠蔽、外側に出る 0.55r 分だけが丸みとして見える
-  const capGeo   = new THREE.SphereGeometry(r, 22, 16);
-  const startPos = curve.getPoint(0).clone()
-                       .addScaledVector(curve.getTangent(0).normalize(),  r * 0.45);
-  const endPos   = curve.getPoint(1).clone()
-                       .addScaledVector(curve.getTangent(1).normalize(), -r * 0.45);
-  [startPos, endPos].forEach(pt => {
-    const cap = new THREE.Mesh(capGeo, mat);
-    cap.position.copy(pt);
-    grp.add(cap);
-  });
-  return mat;
-}
-
-// ── グロー層（同心チューブ + depthTest:false） ─────────────────────
-// depthTest:false → ロッド側面でも常に描画、全体をグロー
-// 14層 × ガウシアン減衰 → 個別の輪が視認できない滑らかなハロー
-function _buildGlowLayers(grp, curve, segs, r, color, startPt, endPt) {
-  const N      = 14;
-  const glowMaxR = r * 5.0;
-  const mats   = [];
-
-  for (let i = 0; i < N; i++) {
-    const t  = i / (N - 1);
-    const lr = r + (glowMaxR - r) * t;            // r → r*5.0 線形
-    const lo = 0.14 * Math.exp(-2.8 * t * t);     // ガウシアン: 中心濃く外縁薄く
-    const rs = i < 6 ? 10 : i < 10 ? 7 : 5;       // 外層ほど粗いポリゴンでOK
-
-    const geo = new THREE.TubeGeometry(curve, Math.min(segs, 120), lr, rs, false);
-    const mat = new THREE.MeshBasicMaterial({
-      color:       new THREE.Color(color),
-      transparent: true,
-      opacity:     lo,
-      blending:    THREE.AdditiveBlending,
-      depthWrite:  false,
-      depthTest:   false,     // ← ロッド側面でも常に描画
-      side:        THREE.FrontSide,
-    });
-    grp.add(new THREE.Mesh(geo, mat));
-
-    // 球体端キャップ（グロー層も丸く終わらせる）
-    const capGeo = new THREE.SphereGeometry(lr, rs, Math.max(4, rs - 2));
-    [startPt, endPt].forEach(pt => {
-      const cap = new THREE.Mesh(capGeo, mat);
-      cap.position.copy(pt);
-      grp.add(cap);
-    });
-
-    mats.push({ mat, base: lo });
+// ── ① 点列スムージング（ラプラシアン） ────────────────────────────
+// 描線の手ブレを除去して滑らかな曲線にする
+// iterations回、各点を隣接点の平均に近づける（端点は固定）
+function _smoothPoints(pts, iterations) {
+  let p = pts.map(v => v.clone());
+  for (let k = 0; k < iterations; k++) {
+    const next = p.map(v => v.clone());
+    for (let i = 1; i < p.length - 1; i++) {
+      next[i].x = p[i-1].x * 0.25 + p[i].x * 0.5 + p[i+1].x * 0.25;
+      next[i].y = p[i-1].y * 0.25 + p[i].y * 0.5 + p[i+1].y * 0.25;
+      next[i].z = p[i-1].z * 0.25 + p[i].z * 0.5 + p[i+1].z * 0.25;
+    }
+    p = next;
   }
-  return mats;
+  return p;
 }
 
-// ── 全ストロークをチューブ化 ─────────────────────────────────────
+// ── ② チューブ＋半球キャップ一体ジオメトリ ───────────────────────
+function _buildTubeWithCaps(curve, tubeSeg, r, radSeg, capSegs) {
+  capSegs = capSegs || 16;
+  const frames = curve.computeFrenetFrames(tubeSeg, false);
+  const pos = [], nor = [], idx = [];
+  let vi = 0;
+
+  function addVertex(x, y, z, nx, ny, nz) {
+    pos.push(x, y, z); nor.push(nx, ny, nz); return vi++;
+  }
+
+  // リング追加（球面法線: sin(phi)=放射方向, cos(phi)=軸方向）
+  function addRing(cx, cy, cz, Nx, Ny, Nz, Bx, By, Bz, ringR, phi, atx, aty, atz) {
+    const base = vi;
+    const sp = Math.sin(phi), cp = Math.cos(phi);
+    for (let j = 0; j < radSeg; j++) {
+      const a = (j / radSeg) * Math.PI * 2;
+      const cs = Math.cos(a), sn = Math.sin(a);
+      const rx = cs*Nx+sn*Bx, ry = cs*Ny+sn*By, rz = cs*Nz+sn*Bz;
+      const nx = rx*sp + atx*cp, ny = ry*sp + aty*cp, nz = rz*sp + atz*cp;
+      const len = Math.sqrt(nx*nx+ny*ny+nz*nz) || 1;
+      addVertex(cx+ringR*rx, cy+ringR*ry, cz+ringR*rz, nx/len, ny/len, nz/len);
+    }
+    return base;
+  }
+
+  function connectRings(b0, b1) {
+    for (let j = 0; j < radSeg; j++) {
+      const jn = (j+1) % radSeg;
+      idx.push(b0+j, b1+j, b1+jn,  b0+j, b1+jn, b0+jn);
+    }
+  }
+
+  // ── 始端キャップ: 極(縮退リング) → 赤道 ────────────────────────
+  const p0 = curve.getPoint(0);
+  const T0 = frames.tangents[0];
+  const N0 = frames.normals[0], B0 = frames.binormals[0];
+
+  // 極を「半径0の縮退リング」として追加 → pole fanが不要、巻き順問題を完全回避
+  const polePos0 = { x: p0.x-T0.x*r, y: p0.y-T0.y*r, z: p0.z-T0.z*r };
+  let degRing0 = vi;
+  for (let j = 0; j < radSeg; j++)
+    addVertex(polePos0.x, polePos0.y, polePos0.z, -T0.x, -T0.y, -T0.z);
+
+  let prevRing = degRing0;
+  for (let i = 1; i <= capSegs; i++) {
+    const phi   = (i / capSegs) * Math.PI * 0.5;
+    const ringR = r * Math.sin(phi);
+    const off   = r * Math.cos(phi);
+    const cx = p0.x-T0.x*off, cy = p0.y-T0.y*off, cz = p0.z-T0.z*off;
+    const rb = addRing(cx,cy,cz, N0.x,N0.y,N0.z, B0.x,B0.y,B0.z,
+                       ringR, phi, -T0.x,-T0.y,-T0.z);
+    connectRings(prevRing, rb);
+    prevRing = rb;
+  }
+
+  // ── チューブ本体 ─────────────────────────────────────────────────
+  let prevBodyRing = prevRing;
+  for (let i = 1; i <= tubeSeg; i++) {
+    const t  = i / tubeSeg;
+    const p  = curve.getPoint(t);
+    const Ni = frames.normals[i], Bi = frames.binormals[i];
+    const rb = addRing(p.x,p.y,p.z, Ni.x,Ni.y,Ni.z, Bi.x,Bi.y,Bi.z,
+                       r, Math.PI*0.5, 0,0,0);
+    connectRings(prevBodyRing, rb);
+    prevBodyRing = rb;
+  }
+
+  // ── 終端キャップ: 赤道 → 極(縮退リング) ──────────────────────────
+  const p1 = curve.getPoint(1);
+  const T1 = frames.tangents[tubeSeg];
+  const N1 = frames.normals[tubeSeg], B1 = frames.binormals[tubeSeg];
+
+  prevRing = prevBodyRing;
+  for (let i = 0; i <= capSegs; i++) { // i=0: phi=π/2（赤道コピー、法線=純放射状=本体と完全一致）
+    const phi   = Math.PI*0.5 - (i / capSegs) * Math.PI*0.5;
+    const ringR = r * Math.sin(phi);
+    const off   = r * Math.cos(phi);
+    const cx = p1.x+T1.x*off, cy = p1.y+T1.y*off, cz = p1.z+T1.z*off;
+    const rb = addRing(cx,cy,cz, N1.x,N1.y,N1.z, B1.x,B1.y,B1.z,
+                       ringR, phi, T1.x,T1.y,T1.z);
+    connectRings(prevRing, rb);
+    prevRing = rb;
+  }
+  // 極を縮退リングとして追加して閉じる（pole fan不要）
+  const polePos1 = { x: p1.x+T1.x*r, y: p1.y+T1.y*r, z: p1.z+T1.z*r };
+  let degRing1 = vi;
+  for (let j = 0; j < radSeg; j++)
+    addVertex(polePos1.x, polePos1.y, polePos1.z, T1.x, T1.y, T1.z);
+  connectRings(prevRing, degRing1);
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(new Float32Array(pos), 3));
+  geo.setAttribute('normal',   new THREE.Float32BufferAttribute(new Float32Array(nor), 3));
+  geo.setIndex(idx);
+  return geo;
+}
+
+// ── ③ ぬめっと光沢 ShaderMaterial ────────────────────────────────
+function _makeWetMat(color) {
+  const c = new THREE.Color(color);
+  return new THREE.ShaderMaterial({
+    uniforms: {
+      uColor:    { value: new THREE.Vector3(c.r, c.g, c.b) },
+      uEmissive: { value: 1.0 },
+    },
+    vertexShader: `
+      varying vec3 vNormal;
+      varying vec3 vViewDir;
+      varying vec3 vWorldNormal;
+      void main() {
+        vec4 mvPos    = modelViewMatrix * vec4(position, 1.0);
+        vNormal       = normalize(normalMatrix * normal);
+        vViewDir      = normalize(-mvPos.xyz);
+        vWorldNormal  = normalize((modelMatrix * vec4(normal, 0.0)).xyz);
+        gl_Position   = projectionMatrix * mvPos;
+      }
+    `,
+    fragmentShader: `
+      uniform vec3  uColor;
+      uniform float uEmissive;
+      varying vec3  vNormal;
+      varying vec3  vViewDir;
+      varying vec3  vWorldNormal;
+
+      // Wrap lighting: シリコンのソフトな拡散光（NVIDIAのSSS近似手法）
+      // wrap=0.5でライトが側面・背面まで回り込む
+      float wrapDiff(vec3 N, vec3 L, float wrap) {
+        return max(0.0, (dot(N, L) + wrap) / (1.0 + wrap));
+      }
+
+      // Oren-Nayar近似: マット表面の粗さによる広い反射
+      float orenNayar(vec3 N, vec3 L, vec3 V, float roughness) {
+        float NdotL = max(0.0, dot(N, L));
+        float NdotV = max(0.0, dot(N, V));
+        float r2    = roughness * roughness;
+        float A     = 1.0 - 0.5 * r2 / (r2 + 0.57);
+        float B     = 0.45 * r2 / (r2 + 0.09);
+        float ga    = dot(V - N * NdotV, L - N * NdotL);
+        float maxNL = max(NdotL, NdotV);
+        return NdotL * (A + B * max(0.0, ga) / (maxNL + 1e-4));
+      }
+
+      void main() {
+        vec3 N = vNormal;
+        vec3 V = vViewDir;
+
+        vec3 L1 = normalize(vec3(0.3, 1.0, 0.7));
+        vec3 L2 = normalize(vec3(-0.6, 0.2, -0.6));
+
+        float diff1 = orenNayar(N, L1, V, 0.8);
+        float diff2 = orenNayar(N, L2, V, 0.8) * 0.35;
+        float wrap1 = wrapDiff(N, L1, 0.45);
+        float wrap2 = wrapDiff(N, L2, 0.3) * 0.25;
+
+        // ── 消灯状態: 暗い色付き樹脂（LEDオフ、外光のみ） ──────────
+        float ambDiff = 0.10 + diff1 * 0.18 + diff2 * 0.06;
+        vec3 colOff = uColor * ambDiff;
+
+        // ── 点灯状態: LED発光 + SSS + 飽和色 ────────────────────────
+        float edgeGlow  = pow(1.0 - clamp(dot(N, V), 0.0, 1.0), 1.5) * 0.4;
+        float lightSum  = uEmissive * 0.90
+                        + (diff1 + diff2) * 0.18
+                        + (wrap1 + wrap2) * 0.10
+                        + edgeGlow * uEmissive;
+
+        // 点灯時の彩度ブースト: uColorを飽和方向に押す
+        // luminance成分を引いて純色に近づける
+        float lum    = dot(uColor, vec3(0.299, 0.587, 0.114));
+        vec3 satColor = mix(vec3(lum), uColor, 1.35); // 1.35倍飽和
+        satColor = clamp(satColor, 0.0, 1.0);
+        vec3 colOn  = satColor * lightSum;
+
+        // 弱い広域スペキュラー（色付き）
+        vec3 H1 = normalize(L1 + V);
+        float sp = pow(clamp(dot(N, H1), 0.0, 1.0), 8.0) * 0.06;
+        colOn += satColor * sp;
+
+        // 消灯→点灯のブレンド（uEmissive 0.05=off, 1.0=on）
+        float onFactor = clamp((uEmissive - 0.05) / 0.95, 0.0, 1.0);
+        vec3 col = mix(colOff, colOn, onFactor);
+
+        // 色相保存トーンマッピング
+        float maxC = max(col.r, max(col.g, col.b));
+        if (maxC > 1.0) col = col / maxC;
+
+        gl_FragColor = vec4(col, 1.0);
+      }
+    `,
+    transparent: false,
+    depthWrite:  true,
+    side:        THREE.FrontSide,
+  });
+}
+
+// ── ④ グロー層（テーパーチューブ、depthTest:false） ───────────────
+// ── グロー: カメラビルボード方式 ─────────────────────────────────
+// 各断面に常にカメラを向くquadを配置 → どの角度からも均等なGaussianグロー
+function _buildBillboardGlowGeo(curve, numBillboards) {
+  const pos = new Float32Array(numBillboards * 4 * 3);
+  const off = new Float32Array(numBillboards * 4 * 2);
+  const idx = [];
+
+  for (let i = 0; i < numBillboards; i++) {
+    const t = i / Math.max(1, numBillboards - 1);
+    const p = curve.getPoint(t);
+    const base = i * 4;
+
+    for (let k = 0; k < 4; k++) {
+      pos[(base+k)*3]   = p.x;
+      pos[(base+k)*3+1] = p.y;
+      pos[(base+k)*3+2] = p.z;
+    }
+    // quad corners: (-1,-1)(1,-1)(1,1)(-1,1)
+    off[(base)*2]   = -1; off[(base)*2+1]   = -1;
+    off[(base+1)*2] =  1; off[(base+1)*2+1] = -1;
+    off[(base+2)*2] =  1; off[(base+2)*2+1] =  1;
+    off[(base+3)*2] = -1; off[(base+3)*2+1] =  1;
+
+    idx.push(base, base+1, base+2, base, base+2, base+3);
+  }
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.setAttribute('aOff',     new THREE.Float32BufferAttribute(off, 2));
+  geo.setIndex(idx);
+  return geo;
+}
+
+function _makeBillboardGlowShader(color, peak) {
+  const c = new THREE.Color(color);
+  return new THREE.ShaderMaterial({
+    uniforms: {
+      uColor:  { value: new THREE.Vector3(c.r, c.g, c.b) },
+      uPeak:   { value: peak },
+      uGlowR:  { value: 1.0 }, // ビルドで上書き
+    },
+    vertexShader: `
+      attribute vec2 aOff;
+      varying   vec2 vOff;
+      uniform   float uGlowR;
+      void main() {
+        vOff = aOff;
+        // eye空間でオフセット → 常にカメラ正面を向く
+        vec4 eyePos = modelViewMatrix * vec4(position, 1.0);
+        eyePos.xy += aOff * uGlowR;
+        gl_Position = projectionMatrix * eyePos;
+      }
+    `,
+    fragmentShader: `
+      uniform vec3  uColor;
+      uniform float uPeak;
+      varying vec2  vOff;
+      void main() {
+        float r = length(vOff);
+        if (r > 1.0) discard;           // 円形クリップ
+        float a = uPeak * exp(-4.5 * r * r);
+        if (a < 0.003) discard;
+        gl_FragColor = vec4(uColor, a);
+      }
+    `,
+    transparent: true,
+    blending:    THREE.AdditiveBlending,
+    depthWrite:  false,
+    depthTest:   false,
+    side:        THREE.DoubleSide,
+  });
+}
+
+function _buildGlowLayers(grp, curve, segs, r, color) {
+  const glowR  = r * 5.0;
+  const nBills = Math.min(segs, 120);
+  const geo    = _buildBillboardGlowGeo(curve, nBills);
+
+  // 輝度の逆数でpeakを補正 → 白・黄など明るい色が飛びすぎず全色均等に見える
+  const c   = new THREE.Color(color);
+  const lum = c.r * 0.299 + c.g * 0.587 + c.b * 0.114;
+  const basePeak = 0.022;
+  const peak = basePeak / Math.max(0.25, lum * 1.4);
+
+  const mat  = _makeBillboardGlowShader(color, peak);
+  mat.uniforms.uGlowR.value = glowR;
+  grp.add(new THREE.Mesh(geo, mat));
+  return [{ mat, base: peak }];
+}
+
+// ── ⑤ 全ストロークをチューブ化 ───────────────────────────────────
 function _buildTubes3D() {
   _tubeGroup3d.traverse(c => {
     if (c.isMesh) { c.geometry?.dispose(); c.material?.dispose(); }
@@ -1932,26 +2167,35 @@ function _buildTubes3D() {
     strokes.forEach(({ points, size }) => {
       if (!points || points.length < 3) return;
 
+      // ① ダウンサンプル
       const step = Math.max(1, Math.ceil(points.length / 260));
       let samp = points.filter((_, i) => i % step === 0);
       if (samp[samp.length-1] !== points[points.length-1]) samp.push(points[points.length-1]);
       if (samp.length < 3) return;
 
-      const pts3  = samp.map(p => _toV3(p.x, p.y, W, H));
-      const curve = new THREE.CatmullRomCurve3(pts3, false, 'catmullrom', 0.5);
-      const segs  = Math.min(480, samp.length * 2);
+      // ② 3D座標変換
+      let pts3 = samp.map(p => _toV3(p.x, p.y, W, H));
+
+      // ① スムージング
+      pts3 = _smoothPoints(pts3, 8);
+
+      // ② 等弧長リサンプリング → 直径を均一に保つ
+      const roughCurve = new THREE.CatmullRomCurve3(pts3, false, 'catmullrom', 0.5);
+      const evenPts    = roughCurve.getSpacedPoints(Math.min(240, samp.length * 2));
+      const curve      = new THREE.CatmullRomCurve3(evenPts, false, 'catmullrom', 0.5);
+      const segs  = Math.min(480, samp.length * 3); // ×3でさらに滑らかに
       const r     = Math.max(0.07, (size * 0.5 / W) * SCENE_W_3D * 1.85);
-      const startPt = pts3[0];
-      const endPt   = pts3[pts3.length - 1];
 
       if (!_flickerGroups3d[color]) _flickerGroups3d[color] = [];
 
-      // ロッド本体
-      const m1 = _buildResinRod(grp, curve, segs, r, color);
-      _flickerGroups3d[color].push({ mat: m1, kind: 'resin', base: { opacity: 0.97, emissive: 0.78 } });
+      // ④ ロッド本体（テーパーチューブ + ぬめっとシェーダー）
+      const mat1 = _makeWetMat(color);
+      const geo1 = _buildTubeWithCaps(curve, segs, r, 20, 24);
+      grp.add(new THREE.Mesh(geo1, mat1));
+      _flickerGroups3d[color].push({ mat: mat1, kind: 'wet', base: 1.0 });
 
-      // グロー層
-      const glowMats = _buildGlowLayers(grp, curve, segs, r, color, startPt, endPt);
+      // ⑤ グロー層
+      const glowMats = _buildGlowLayers(grp, curve, segs, r, color);
       glowMats.forEach(({ mat, base }) => {
         _flickerGroups3d[color].push({ mat, kind: 'glow', base });
       });
@@ -2024,11 +2268,18 @@ function _flicker3D() {
   Object.keys(_flickerGroups3d).forEach(color => {
     const mul = _mul3D(curSet.has(color), nextSet.has(color), phase, _3dStep);
     _flickerGroups3d[color].forEach(({ mat, kind, base }) => {
-      if (kind === 'resin') {
-        mat.opacity           = base.opacity  * mul;
-        mat.emissiveIntensity = base.emissive * mul;
+      if (kind === 'wet') {
+        // 消灯: uEmissive→0.05（暗い樹脂のみ）、点灯: 1.0（フル発光）
+        const t = Math.max(0, (mul - 0.25) / 0.75);
+        mat.uniforms.uEmissive.value = 0.05 + 0.95 * t;
       }
-      if (kind === 'glow') mat.opacity = base * mul;
+      if (kind === 'glow') {
+        // グローは消灯時ゼロ、点灯時だけ表示
+        const t = Math.max(0, (mul - 0.25) / 0.75);
+        // ShaderMaterialはuPeakで制御、MeshBasicMaterialはopacityで制御
+        if (mat.uniforms) mat.uniforms.uPeak.value = base * t;
+        else mat.opacity = base * t;
+      }
     });
   });
 
@@ -2053,17 +2304,9 @@ function _init3DRenderer() {
   _camera3d = new THREE.PerspectiveCamera(48, W3 / H3, 0.01, 500);
   _camera3d.position.set(0, 0, 22);
 
-  // ライティング（LEDネオン樹脂ロッド向け）
-  // キーライト: 上45°やや手前 → 艶コートの光沢ハイライトが走る
-  const keyLight = new THREE.DirectionalLight(0xffffff, 0.70);
-  keyLight.position.set(3, 10, 7);
-  _scene3d.add(keyLight);
-  // リムライト: 斜め後ろ → ロッドの輪郭を立てる
-  const rimLight = new THREE.DirectionalLight(0xffffff, 0.20);
-  rimLight.position.set(-6, 3, -5);
-  _scene3d.add(rimLight);
-  // アンビエント: ごく薄く（暗所に設置されたLEDネオン）
-  _scene3d.add(new THREE.AmbientLight(0x080810));
+  // ライティング（ぬめっと光沢向け: フレネル・スペキュラーをシェーダー内計算）
+  // シェーダーが独自にライト計算するためThree.jsライトは最小限
+  _scene3d.add(new THREE.AmbientLight(0x050508));
 
   _controls3d = new THREE.OrbitControls(_camera3d, canvas3d);
   _controls3d.enableDamping   = true;

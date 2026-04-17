@@ -1004,6 +1004,23 @@ function parseSVGtoStrokes(svgText) {
   const svgEl = doc.querySelector('svg');
   if (!svgEl) throw new Error('SVG element not found');
 
+  // <style>ブロックからクラス→色のマップを作成
+  const classColorMap = {};
+  doc.querySelectorAll('style').forEach(styleEl => {
+    const css = styleEl.textContent;
+    const rules = css.match(/\.[a-zA-Z0-9_-]+\s*\{[^}]+\}/g) || [];
+    rules.forEach(rule => {
+      const clsMatch = rule.match(/\.([a-zA-Z0-9_-]+)/);
+      const fillMatch = rule.match(/fill\s*:\s*([^;}\s]+)/);
+      const strokeMatch = rule.match(/stroke\s*:\s*([^;}\s]+)/);
+      if (clsMatch) {
+        const cls = clsMatch[1];
+        if (strokeMatch && strokeMatch[1] !== 'none') classColorMap[cls] = strokeMatch[1];
+        else if (fillMatch && fillMatch[1] !== 'none') classColorMap[cls] = fillMatch[1];
+      }
+    });
+  });
+
   // SVGのviewBox / width / height からスケール計算
   let vbX = 0, vbY = 0, vbW = 0, vbH = 0;
   const vb = svgEl.getAttribute('viewBox');
@@ -1016,7 +1033,6 @@ function parseSVGtoStrokes(svgText) {
   const scaleX = vbW > 0 ? W / vbW : 1;
   const scaleY = vbH > 0 ? H / vbH : 1;
   const sc = Math.min(scaleX, scaleY);
-  // センタリングオフセット
   const offX = (W - vbW * sc) / 2 - vbX * sc;
   const offY = (H - vbH * sc) / 2 - vbY * sc;
 
@@ -1025,31 +1041,25 @@ function parseSVGtoStrokes(svgText) {
   let strokeCount = 0;
   const colorSet = new Set();
 
-  // 対象要素を全収集
   const elements = doc.querySelectorAll('path, line, polyline, polygon, circle, ellipse, rect');
 
   elements.forEach(el => {
-    // 色を取得（stroke優先、なければfill）
-    const rawColor = getElColor(el);
+    const rawColor = getElColor(el, classColorMap);
     if (!rawColor) return;
     const hex = colorToHex(rawColor);
     if (!hex) return;
 
-    // colorStrokesに登録
     if (!colorStrokes[hex]) colorStrokes[hex] = [];
     if (!ALL_COLORS.includes(hex)) ALL_COLORS.push(hex);
     colorSet.add(hex);
 
-    // 要素をポイント列に変換
     const pointsList = elementToPoints(el);
     pointsList.forEach(points => {
       if (points.length < 2) return;
-      // スケーリング適用
       const scaled = points.map(p => ({
         x: p.x * sc + offX,
         y: p.y * sc + offY
       }));
-      // キャンバス範囲内の点のみ（軽いクリップ）
       const idx = colorStrokes[hex].length;
       colorStrokes[hex].push({ points: scaled, size: brushSize });
       drawLog.push({ id: strokeId++, color: hex, idx });
@@ -1060,8 +1070,9 @@ function parseSVGtoStrokes(svgText) {
   return { strokes: strokeCount, colors: colorSet.size };
 }
 
-function getElColor(el) {
-  // style属性 → 個別属性 → 親 の順で取得
+function getElColor(el, classColorMap) {
+  classColorMap = classColorMap || {};
+  // style属性のインライン stroke/fill
   const style = el.getAttribute('style') || '';
   const strokeMatch = style.match(/(?:^|;)\s*stroke\s*:\s*([^;]+)/);
   if (strokeMatch) {
@@ -1077,22 +1088,32 @@ function getElColor(el) {
   }
   const fill = el.getAttribute('fill');
   if (fill && fill !== 'none') return fill;
+  // CSSクラスから取得
+  const classes = (el.getAttribute('class') || '').split(/\s+/);
+  for (const cls of classes) {
+    if (classColorMap[cls]) return classColorMap[cls];
+  }
   return null;
 }
 
 function colorToHex(color) {
   if (!color) return null;
   color = color.trim().toLowerCase();
-  if (color === 'black') return '#000000';
-  if (color === 'white') return '#ffffff';
-  if (color === 'red') return '#ff0000';
+  const named = {
+    black:'#000000', white:'#ffffff', red:'#ff0000', green:'#008000',
+    lime:'#00ff00', blue:'#0000ff', yellow:'#ffff00', cyan:'#00ffff',
+    aqua:'#00ffff', magenta:'#ff00ff', fuchsia:'#ff00ff', orange:'#ffa500',
+    pink:'#ffc0cb', purple:'#800080', gray:'#808080', grey:'#808080',
+    silver:'#c0c0c0', maroon:'#800000', olive:'#808000', navy:'#000080',
+    teal:'#008080'
+  };
+  if (named[color]) return named[color];
   if (color.startsWith('#')) {
     if (color.length === 4) {
       return '#' + color[1]+color[1]+color[2]+color[2]+color[3]+color[3];
     }
     return color.length === 7 ? color : null;
   }
-  // rgb(r,g,b)
   const rgb = color.match(/rgb\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)/);
   if (rgb) {
     return '#' + [rgb[1],rgb[2],rgb[3]].map(v => parseInt(v).toString(16).padStart(2,'0')).join('');

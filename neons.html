@@ -745,6 +745,22 @@ select option { background: #111; }
   <div id="export-3d">
     <button class="exp3d-btn" onclick="export3DStill('jpg')">↓ JPG</button>
     <button class="exp3d-btn" onclick="export3DStill('png')">↓ PNG</button>
+    <select id="sel-3d-res" class="exp3d-sel">
+      <option value="screen">SCREEN</option>
+      <option value="hd" selected>HD 1080p</option>
+      <option value="4k">4K 2160p</option>
+    </select>
+    <select id="sel-3d-fps" class="exp3d-sel">
+      <option value="30">30fps</option>
+      <option value="60" selected>60fps</option>
+    </select>
+    <select id="sel-3d-sec" class="exp3d-sel">
+      <option value="3">3s</option>
+      <option value="5">5s</option>
+      <option value="10">10s</option>
+      <option value="15">15s</option>
+      <option value="30">30s</option>
+    </select>
     <button class="exp3d-btn" id="btn-3d-mp4" onclick="toggle3DMP4()">↓ MP4</button>
   </div>
   <!-- モーションコントロール（左下） -->
@@ -759,6 +775,9 @@ select option { background: #111; }
       <span class="mot-lbl">SPD</span>
       <input type="range" id="motion-spd-slider" min="1" max="100" value="40"
         oninput="_3dSpeedMul = +this.value / 40">
+    </div>
+    <div id="motion-wave">
+      <button class="mot-btn" id="btn-wave" onclick="toggleWave()">WAVE</button>
     </div>
   </div>
   <div id="hint-3d">drag — orbit &nbsp;·&nbsp; scroll — zoom &nbsp;·&nbsp; Esc — exit</div>
@@ -1697,6 +1716,7 @@ document.addEventListener('keydown', e => {
     spaceDown = true;
     CV.style.cursor = 'grab';
   }
+  if (e.key === 'Escape' && _3dOpen) exit3D(); // 3D: Escで2Dに戻る
 });
 document.addEventListener('keyup', e => {
   if (e.code === 'Space') {
@@ -1828,6 +1848,7 @@ let _colorSpeeds3d = {};
 // カラー投影ライト用グローバル
 const MAX_PROJ_LIGHTS = 32;              // 最大ライト数（ストローク × 4サンプル）
 let _projStrokeSamples = [];             // [{positions:[V3], color:Color}]
+let _waveEnabled = false;                // ウニョウニョON/OFF
 let _wetMats3d         = [];             // 全wetマテリアルへの参照
 // 毎フレーム更新用Float32Array（new Arrayを避けてGCゼロ）
 const _projPosArr = new Float32Array(MAX_PROJ_LIGHTS * 3);
@@ -1854,11 +1875,11 @@ function _smoothPoints(pts, iterations) {
 function _buildTubeWithCaps(curve, tubeSeg, r, radSeg, capSegs) {
   capSegs = capSegs || 16;
   const frames = curve.computeFrenetFrames(tubeSeg, false);
-  const pos = [], nor = [], idx = [];
+  const pos = [], nor = [], aTbuf = [], idx = [];
   let vi = 0;
 
-  function addVertex(x, y, z, nx, ny, nz) {
-    pos.push(x, y, z); nor.push(nx, ny, nz); return vi++;
+  function addVertex(x, y, z, nx, ny, nz, t) {
+    pos.push(x, y, z); nor.push(nx, ny, nz); aTbuf.push(t !== undefined ? t : 0.0); return vi++;
   }
 
   // リング追加（球面法線: sin(phi)=放射方向, cos(phi)=軸方向）
@@ -1892,7 +1913,7 @@ function _buildTubeWithCaps(curve, tubeSeg, r, radSeg, capSegs) {
   const polePos0 = { x: p0.x-T0.x*r, y: p0.y-T0.y*r, z: p0.z-T0.z*r };
   let degRing0 = vi;
   for (let j = 0; j < radSeg; j++)
-    addVertex(polePos0.x, polePos0.y, polePos0.z, -T0.x, -T0.y, -T0.z);
+    addVertex(polePos0.x, polePos0.y, polePos0.z, -T0.x, -T0.y, -T0.z, 0.0);
 
   let prevRing = degRing0;
   for (let i = 1; i <= capSegs; i++) {
@@ -1900,8 +1921,9 @@ function _buildTubeWithCaps(curve, tubeSeg, r, radSeg, capSegs) {
     const ringR = r * Math.sin(phi);
     const off   = r * Math.cos(phi);
     const cx = p0.x-T0.x*off, cy = p0.y-T0.y*off, cz = p0.z-T0.z*off;
+    const capT0 = (i / capSegs) * 0.08; // キャップは 0~0.08 の範囲
     const rb = addRing(cx,cy,cz, N0.x,N0.y,N0.z, B0.x,B0.y,B0.z,
-                       ringR, phi, -T0.x,-T0.y,-T0.z);
+                       ringR, phi, -T0.x,-T0.y,-T0.z, capT0);
     connectRings(prevRing, rb);
     prevRing = rb;
   }
@@ -1912,8 +1934,9 @@ function _buildTubeWithCaps(curve, tubeSeg, r, radSeg, capSegs) {
     const t  = i / tubeSeg;
     const p  = curve.getPoint(t);
     const Ni = frames.normals[i], Bi = frames.binormals[i];
+    const bodyT = 0.08 + (i / tubeSeg) * 0.84; // 本体は 0.08~0.92
     const rb = addRing(p.x,p.y,p.z, Ni.x,Ni.y,Ni.z, Bi.x,Bi.y,Bi.z,
-                       r, Math.PI*0.5, 0,0,0);
+                       r, Math.PI*0.5, 0,0,0, bodyT);
     connectRings(prevBodyRing, rb);
     prevBodyRing = rb;
   }
@@ -1929,8 +1952,9 @@ function _buildTubeWithCaps(curve, tubeSeg, r, radSeg, capSegs) {
     const ringR = r * Math.sin(phi);
     const off   = r * Math.cos(phi);
     const cx = p1.x+T1.x*off, cy = p1.y+T1.y*off, cz = p1.z+T1.z*off;
+    const capT1 = 0.92 + (i / capSegs) * 0.08; // キャップは 0.92~1.0 の範囲
     const rb = addRing(cx,cy,cz, N1.x,N1.y,N1.z, B1.x,B1.y,B1.z,
-                       ringR, phi, T1.x,T1.y,T1.z);
+                       ringR, phi, T1.x,T1.y,T1.z, capT1);
     connectRings(prevRing, rb);
     prevRing = rb;
   }
@@ -1938,12 +1962,13 @@ function _buildTubeWithCaps(curve, tubeSeg, r, radSeg, capSegs) {
   const polePos1 = { x: p1.x+T1.x*r, y: p1.y+T1.y*r, z: p1.z+T1.z*r };
   let degRing1 = vi;
   for (let j = 0; j < radSeg; j++)
-    addVertex(polePos1.x, polePos1.y, polePos1.z, T1.x, T1.y, T1.z);
+    addVertex(polePos1.x, polePos1.y, polePos1.z, T1.x, T1.y, T1.z, 1.0);
   connectRings(prevRing, degRing1);
 
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.Float32BufferAttribute(new Float32Array(pos), 3));
   geo.setAttribute('normal',   new THREE.Float32BufferAttribute(new Float32Array(nor), 3));
+  geo.setAttribute('aT',       new THREE.Float32BufferAttribute(new Float32Array(aTbuf), 1));
   geo.setIndex(idx);
   return geo;
 }
@@ -1958,14 +1983,37 @@ function _makeWetMat(color, stencilRef) {
       uProjPos:   { value: Array.from({length: MAX_PROJ_LIGHTS}, () => new THREE.Vector3()) },
       uProjCol:   { value: Array.from({length: MAX_PROJ_LIGHTS}, () => new THREE.Vector3()) },
       uProjCount: { value: 0 },
+      uTime:      { value: 0.0 },
+      uDriftAmp:  { value: 0.0 },  // DRIFT/SPIN/RANDOM 標準動き（小振幅+Z）
+      uWaveAmp:   { value: 0.0 },  // WAVE ボタン（大振幅・チューブ独立）
+      uPhase:     { value: 0.0 },  // チューブごとのランダム位相
     },
     vertexShader: `
-      varying vec3 vNormal;
-      varying vec3 vViewDir;
-      varying vec3 vWorldNormal;
-      varying vec3 vWorldPos;
+      attribute float aT;
+      uniform   float uTime;
+      uniform   float uDriftAmp;
+      uniform   float uWaveAmp;
+      uniform   float uPhase;
+      varying   vec3  vNormal;
+      varying   vec3  vViewDir;
+      varying   vec3  vWorldNormal;
+      varying   vec3  vWorldPos;
       void main() {
-        vec4 worldPos = modelMatrix * vec4(position, 1.0);
+        // ── DRIFT標準動き: 小振幅XYZ、全チューブ共通位相 ──
+        float dFreq = 5.0;
+        float dX = sin(aT * dFreq + uTime * 1.2)         * 0.10 * uDriftAmp;
+        float dY = sin(aT * dFreq + uTime * 0.9 + 1.1)   * 0.07 * uDriftAmp;
+        float dZ = sin(aT * dFreq + uTime * 0.7 + 2.1)   * 0.12 * uDriftAmp;
+
+        // ── WAVE: 大振幅XYZ、チューブごとに uPhase でズレ ──
+        float wFreq = 6.28;
+        float wX = sin(aT * wFreq + uTime * 1.4 + uPhase)         * 0.22 * uWaveAmp;
+        float wY = sin(aT * wFreq + uTime * 1.0 + uPhase + 1.571) * 0.16 * uWaveAmp;
+        float wZ = sin(aT * wFreq + uTime * 0.8 + uPhase + 3.14)  * 0.18 * uWaveAmp;
+
+        vec3 displaced = position + vec3(dX + wX, dY + wY, dZ + wZ);
+
+        vec4 worldPos = modelMatrix * vec4(displaced, 1.0);
         vWorldPos     = worldPos.xyz;
         vec4 mvPos    = viewMatrix * worldPos;
         vNormal       = normalize(normalMatrix * normal);
@@ -2256,6 +2304,8 @@ function _buildTubes3D() {
       const samplePositions = [0.1, 0.35, 0.65, 0.9].map(t => curve.getPoint(t));
       const sc = new THREE.Color(color);
       _projStrokeSamples.push({ positions: samplePositions, color: sc, colorKey: color });
+      // チューブごとにランダム位相を設定（WAVE時に独立した動きになる）
+      mat1.uniforms.uPhase.value = Math.random() * Math.PI * 2;
       _wetMats3d.push({ mat: mat1, colorKey: color });
 
       // ⑤ グロー層
@@ -2482,7 +2532,21 @@ function _animate3D() {
     _controls3d.update();
   }
   _flicker3D();
-  _renderer3d.clearStencil(); // 毎フレームステンシルをリセット
+
+  // uTime / uDriftAmp / uWaveAmp を毎フレーム更新
+  const rawT = performance.now() / 1000;
+  // DRIFT/SPIN/RANDOM(mode 1-3) では標準動きON、STILLではOFF
+  const driftTarget = (_3dMotionMode > 0) ? 1.0 : 0.0;
+  const waveTarget  = _waveEnabled ? 1.0 : 0.0;
+  _wetMats3d.forEach(({ mat }) => {
+    mat.uniforms.uTime.value = rawT * _3dSpeedMul;
+    const cd = mat.uniforms.uDriftAmp.value;
+    mat.uniforms.uDriftAmp.value = cd + (driftTarget - cd) * 0.04;
+    const cw = mat.uniforms.uWaveAmp.value;
+    mat.uniforms.uWaveAmp.value  = cw + (waveTarget  - cw) * 0.04;
+  });
+
+  _renderer3d.clearStencil();
   _renderer3d.render(_scene3d, _camera3d);
 }
 
@@ -2538,16 +2602,37 @@ function exit3D() {
 }
 
 // ── 3D エクスポート ───────────────────────────────────────────────
+function _get3DExportSize() {
+  const res = document.getElementById('sel-3d-res')?.value || 'screen';
+  const canvas = document.getElementById('canvas-3d');
+  // キャンバスのアスペクト比を維持
+  const aspect = canvas.width / canvas.height;
+  if (res === '4k')  return { w: Math.round(3840),              h: Math.round(3840 / aspect) };
+  if (res === 'hd')  return { w: Math.round(1920),              h: Math.round(1920 / aspect) };
+  return { w: canvas.width, h: canvas.height }; // screen
+}
+
 function export3DStill(type) {
-  // preserveDrawingBuffer: true なので toDataURL() が使える
+  const { w, h } = _get3DExportSize();
+  const canvas   = document.getElementById('canvas-3d');
+  const origW    = canvas.width, origH = canvas.height;
+
+  // 一時的にリサイズして高解像度レンダリング
+  _renderer3d.setSize(w, h);
+  _camera3d.aspect = w / h;
+  _camera3d.updateProjectionMatrix();
   _renderer3d.render(_scene3d, _camera3d);
+
   const link = document.createElement('a');
   const ts   = new Date().toISOString().slice(0,19).replace(/[:T]/g,'-');
   link.download = 'NEONS_3D_' + ts + '.' + type;
-  link.href     = document.getElementById('canvas-3d').toDataURL(
-    type === 'jpg' ? 'image/jpeg' : 'image/png', 0.95
-  );
+  link.href = canvas.toDataURL(type === 'jpg' ? 'image/jpeg' : 'image/png', 0.97);
   link.click();
+
+  // 元に戻す
+  _renderer3d.setSize(origW, origH);
+  _camera3d.aspect = origW / origH;
+  _camera3d.updateProjectionMatrix();
 }
 
 let _3dRecorder = null, _3dChunks = [];
@@ -2558,21 +2643,47 @@ function toggle3DMP4() {
     _3dRecorder.stop();
     return;
   }
+
+  const fps    = parseInt(document.getElementById('sel-3d-fps')?.value || 60);
+  const { w, h } = _get3DExportSize();
   const canvas = document.getElementById('canvas-3d');
+  const origW  = canvas.width, origH = canvas.height;
+
+  // HD/4K解像度にリサイズしてからキャプチャ開始
+  _renderer3d.setSize(w, h);
+  _camera3d.aspect = w / h;
+  _camera3d.updateProjectionMatrix();
+
   _3dChunks = [];
-  const mime = ['video/mp4;codecs="avc1"','video/webm;codecs=vp9','video/webm']
-    .find(m => { try { return MediaRecorder.isTypeSupported(m); } catch(e){ return false; }})
-    || 'video/webm';
-  const stream = canvas.captureStream(30);
-  _3dRecorder = new MediaRecorder(stream, { mimeType: mime });
+  const mime = [
+    'video/mp4;codecs="avc1.42E01E"',
+    'video/mp4;codecs="avc1"',
+    'video/webm;codecs=vp9',
+    'video/webm'
+  ].find(m => { try { return MediaRecorder.isTypeSupported(m); } catch(e){ return false; }})
+  || 'video/webm';
+
+  // ビットレート: HD=20Mbps, 4K=60Mbps
+  const isHD   = (w >= 1920);
+  const is4K   = (w >= 3840);
+  const bps    = is4K ? 60_000_000 : isHD ? 20_000_000 : 8_000_000;
+
+  const stream = canvas.captureStream(fps);
+  _3dRecorder  = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: bps });
   _3dRecorder.ondataavailable = e => { if(e.data.size) _3dChunks.push(e.data); };
   _3dRecorder.onstop = () => {
+    // 元のサイズに戻す
+    _renderer3d.setSize(origW, origH);
+    _camera3d.aspect = origW / origH;
+    _camera3d.updateProjectionMatrix();
+
     const ext  = mime.includes('mp4') ? 'mp4' : 'webm';
+    const res  = is4K ? '_4K' : isHD ? '_HD' : '';
     const ts   = new Date().toISOString().slice(0,19).replace(/[:T]/g,'-');
     const blob = new Blob(_3dChunks, { type: mime });
     const url  = URL.createObjectURL(blob);
     const a    = document.createElement('a');
-    a.download = 'NEONS_3D_' + ts + '.' + ext;
+    a.download = 'NEONS_3D' + res + '_' + ts + '.' + ext;
     a.href = url; a.click();
     URL.revokeObjectURL(url);
     if (btn) { btn.textContent = '↓ MP4'; btn.classList.remove('on'); }
@@ -2580,21 +2691,23 @@ function toggle3DMP4() {
   };
   _3dRecorder.start();
   if (btn) { btn.textContent = '● REC'; btn.classList.add('on'); }
-  // export-secパネルの秒数を流用
-  const sec = parseInt(document.getElementById('export-sec')?.value || 3);
+  const sec = parseInt(document.getElementById('sel-3d-sec')?.value || 3);
   setTimeout(() => { if (_3dRecorder?.state === 'recording') _3dRecorder.stop(); }, sec * 1000);
 }
 
 function toggle3D() { _3dOpen ? exit3D() : enter3D(); }
+
+function toggleWave() {
+  _waveEnabled = !_waveEnabled;
+  document.getElementById('btn-wave').classList.toggle('active', _waveEnabled);
+}
 
 function toggle3DAutoRotate() {
   // 後方互換（旧ボタンが残っていた場合用）
   set3DMotion(_3dMotionMode === 0 ? 1 : 0);
 }
 
-document.addEventListener('keydown', e => {
-  if (e.key === 'Escape' && _3dOpen) exit3D();
-});
+
 </script>
 </body>
 </html>

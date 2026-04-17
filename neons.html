@@ -649,10 +649,22 @@ select option { background: #111; }
         </div>
       </div>
     </div>
+    <div class="sec">
+      <div class="lbl">④ SVG</div>
+      <label class="svg-import-btn" title="SVG / AIファイルを読み込む" style="cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:4px">
+        <svg width="22" height="22" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M11 3v11M7 10l4 4 4-4"/>
+          <path d="M4 16v1a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-1"/>
+        </svg>
+        <span style="font-size:7px;letter-spacing:0.12em;color:var(--dim)">IMPORT</span>
+        <input type="file" id="svg-file-input" accept=".svg,.ai"
+          style="position:absolute;opacity:0;width:1px;height:1px;pointer-events:none"
+          onchange="importSVG(this)">
+      </label>
+      <div id="svg-status" style="font-size:7px;color:var(--dim);text-align:center;margin-top:4px;line-height:1.5;min-height:16px"></div>
+    </div>
   </div>
-</div>
-
-<!-- OUTPUT PANEL (slides in from left, bottom-anchored) -->
+</div> (slides in from left, bottom-anchored) -->
 <div id="panel-output" class="slide-panel">
   <div class="panel-title">OUT</div>
   <div class="panel-body">
@@ -961,8 +973,289 @@ function updateColorPalette() {
   divEl.style.display = (usedColors.length > 0 && unusedColors.length > 0) ? 'block' : 'none';
 }
 
+// ── SVG IMPORT ──────────────────────────────────────────────
+function importSVG(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const status = document.getElementById('svg-status');
+  status.textContent = '読み込み中...';
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      const result = parseSVGtoStrokes(e.target.result);
+      if (result.strokes === 0) { status.textContent = 'パスが見つかりません'; return; }
+      status.textContent = `${result.strokes}本 / ${result.colors}色 読み込み完了`;
+      updateColorPalette();
+      rebuildAllCaches();
+      redrawAll(glowApplied);
+      saveToLocal();
+    } catch(err) {
+      status.textContent = '読み込みエラー';
+      console.error(err);
+    }
+    input.value = '';
+  };
+  reader.readAsText(file);
+}
+
+function parseSVGtoStrokes(svgText) {
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(svgText, 'image/svg+xml');
+  const svgEl = doc.querySelector('svg');
+  if (!svgEl) throw new Error('SVG element not found');
+
+  // SVGのviewBox / width / height からスケール計算
+  let vbX = 0, vbY = 0, vbW = 0, vbH = 0;
+  const vb = svgEl.getAttribute('viewBox');
+  if (vb) {
+    [vbX, vbY, vbW, vbH] = vb.split(/[\s,]+/).map(Number);
+  } else {
+    vbW = parseFloat(svgEl.getAttribute('width')) || 500;
+    vbH = parseFloat(svgEl.getAttribute('height')) || 500;
+  }
+  const scaleX = vbW > 0 ? W / vbW : 1;
+  const scaleY = vbH > 0 ? H / vbH : 1;
+  const sc = Math.min(scaleX, scaleY);
+  // センタリングオフセット
+  const offX = (W - vbW * sc) / 2 - vbX * sc;
+  const offY = (H - vbH * sc) / 2 - vbY * sc;
+
+  saveHist();
+
+  let strokeCount = 0;
+  const colorSet = new Set();
+
+  // 対象要素を全収集
+  const elements = doc.querySelectorAll('path, line, polyline, polygon, circle, ellipse, rect');
+
+  elements.forEach(el => {
+    // 色を取得（stroke優先、なければfill）
+    const rawColor = getElColor(el);
+    if (!rawColor) return;
+    const hex = colorToHex(rawColor);
+    if (!hex) return;
+
+    // colorStrokesに登録
+    if (!colorStrokes[hex]) colorStrokes[hex] = [];
+    if (!ALL_COLORS.includes(hex)) ALL_COLORS.push(hex);
+    colorSet.add(hex);
+
+    // 要素をポイント列に変換
+    const pointsList = elementToPoints(el);
+    pointsList.forEach(points => {
+      if (points.length < 2) return;
+      // スケーリング適用
+      const scaled = points.map(p => ({
+        x: p.x * sc + offX,
+        y: p.y * sc + offY
+      }));
+      // キャンバス範囲内の点のみ（軽いクリップ）
+      const idx = colorStrokes[hex].length;
+      colorStrokes[hex].push({ points: scaled, size: brushSize });
+      drawLog.push({ id: strokeId++, color: hex, idx });
+      strokeCount++;
+    });
+  });
+
+  return { strokes: strokeCount, colors: colorSet.size };
+}
+
+function getElColor(el) {
+  // style属性 → 個別属性 → 親 の順で取得
+  const style = el.getAttribute('style') || '';
+  const strokeMatch = style.match(/(?:^|;)\s*stroke\s*:\s*([^;]+)/);
+  if (strokeMatch) {
+    const v = strokeMatch[1].trim();
+    if (v !== 'none' && v !== 'transparent') return v;
+  }
+  const stroke = el.getAttribute('stroke');
+  if (stroke && stroke !== 'none') return stroke;
+  const fillMatch = style.match(/(?:^|;)\s*fill\s*:\s*([^;]+)/);
+  if (fillMatch) {
+    const v = fillMatch[1].trim();
+    if (v !== 'none' && v !== 'transparent') return v;
+  }
+  const fill = el.getAttribute('fill');
+  if (fill && fill !== 'none') return fill;
+  return null;
+}
+
+function colorToHex(color) {
+  if (!color) return null;
+  color = color.trim().toLowerCase();
+  if (color === 'black') return '#000000';
+  if (color === 'white') return '#ffffff';
+  if (color === 'red') return '#ff0000';
+  if (color.startsWith('#')) {
+    if (color.length === 4) {
+      return '#' + color[1]+color[1]+color[2]+color[2]+color[3]+color[3];
+    }
+    return color.length === 7 ? color : null;
+  }
+  // rgb(r,g,b)
+  const rgb = color.match(/rgb\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)/);
+  if (rgb) {
+    return '#' + [rgb[1],rgb[2],rgb[3]].map(v => parseInt(v).toString(16).padStart(2,'0')).join('');
+  }
+  return null;
+}
+
+function elementToPoints(el) {
+  const tag = el.tagName.toLowerCase();
+  if (tag === 'path') return svgPathToPoints(el.getAttribute('d') || '');
+  if (tag === 'line') {
+    const p = [[+el.getAttribute('x1'),+el.getAttribute('y1')],
+               [+el.getAttribute('x2'),+el.getAttribute('y2')]];
+    return [p.map(([x,y])=>({x,y}))];
+  }
+  if (tag === 'polyline' || tag === 'polygon') {
+    const pts = (el.getAttribute('points')||'').trim().split(/[\s,]+/).reduce((acc,v,i,a)=>{
+      if(i%2===0) acc.push({x:+v,y:+a[i+1]}); return acc;
+    },[]);
+    return [pts];
+  }
+  if (tag === 'rect') {
+    const x=+el.getAttribute('x')||0, y=+el.getAttribute('y')||0;
+    const w=+el.getAttribute('width')||0, h=+el.getAttribute('height')||0;
+    return [[{x,y},{x:x+w,y},{x:x+w,y:y+h},{x,y:y+h},{x,y}]];
+  }
+  if (tag === 'circle') {
+    const cx=+el.getAttribute('cx')||0, cy=+el.getAttribute('cy')||0, r=+el.getAttribute('r')||0;
+    return [sampleEllipse(cx,cy,r,r,0,36)];
+  }
+  if (tag === 'ellipse') {
+    const cx=+el.getAttribute('cx')||0, cy=+el.getAttribute('cy')||0;
+    const rx=+el.getAttribute('rx')||0, ry=+el.getAttribute('ry')||0;
+    return [sampleEllipse(cx,cy,rx,ry,0,36)];
+  }
+  return [];
+}
+
+function sampleEllipse(cx,cy,rx,ry,rot,segs) {
+  const pts = [];
+  for(let i=0;i<=segs;i++) {
+    const a = (i/segs)*Math.PI*2;
+    pts.push({x: cx+Math.cos(a)*rx, y: cy+Math.sin(a)*ry});
+  }
+  return pts;
+}
+
+// SVG path d属性を点列に変換
+function svgPathToPoints(d) {
+  const results = [];
+  let cur = {x:0,y:0}, start = {x:0,y:0};
+  let curPoints = [];
+  const SEGS = 16; // ベジェ分割数
+
+  const commands = d.match(/[MmZzLlHhVvCcSsQqTtAa][^MmZzLlHhVvCcSsQqTtAa]*/g) || [];
+
+  commands.forEach(cmd => {
+    const type = cmd[0];
+    const rel = type === type.toLowerCase() && type !== 'z' && type !== 'Z';
+    const nums = cmd.slice(1).trim().split(/[\s,]+/).map(Number).filter(v=>!isNaN(v));
+    let i = 0;
+
+    const abs = (dx, dy) => rel ? {x: cur.x+dx, y: cur.y+dy} : {x:dx, y:dy};
+
+    const push = p => { curPoints.push({x:p.x, y:p.y}); cur = p; };
+
+    switch(type.toUpperCase()) {
+      case 'M':
+        while (i < nums.length) {
+          if (curPoints.length > 1) { results.push(curPoints); curPoints = []; }
+          const p = abs(nums[i], nums[i+1]); i+=2;
+          if (curPoints.length === 0) { cur = p; start = p; curPoints.push({...p}); }
+          else push(p);
+        }
+        break;
+      case 'Z':
+        curPoints.push({...start});
+        results.push(curPoints); curPoints = []; cur = {...start};
+        break;
+      case 'L':
+        while(i<nums.length){ push(abs(nums[i],nums[i+1])); i+=2; } break;
+      case 'H':
+        while(i<nums.length){ push(abs(nums[i], rel?0:cur.y)); i++; } break;
+      case 'V':
+        while(i<nums.length){ push(abs(rel?0:cur.x, nums[i])); i++; } break;
+      case 'C':
+        while(i<nums.length){
+          const p1=abs(nums[i],nums[i+1]), p2=abs(nums[i+2],nums[i+3]), p3=abs(nums[i+4],nums[i+5]); i+=6;
+          for(let t=1/SEGS;t<=1+1e-6;t+=1/SEGS){
+            const u=1-t, pt={
+              x: u*u*u*cur.x + 3*u*u*t*p1.x + 3*u*t*t*p2.x + t*t*t*p3.x,
+              y: u*u*u*cur.y + 3*u*u*t*p1.y + 3*u*t*t*p2.y + t*t*t*p3.y
+            }; push(pt);
+          }
+          cur = p3;
+        } break;
+      case 'S':
+        while(i<nums.length){
+          const p2=abs(nums[i],nums[i+1]), p3=abs(nums[i+2],nums[i+3]); i+=4;
+          const p1={x:2*cur.x-cur.x, y:2*cur.y-cur.y}; // 簡略
+          for(let t=1/SEGS;t<=1+1e-6;t+=1/SEGS){
+            const u=1-t, pt={
+              x: u*u*u*cur.x + 3*u*u*t*p1.x + 3*u*t*t*p2.x + t*t*t*p3.x,
+              y: u*u*u*cur.y + 3*u*u*t*p1.y + 3*u*t*t*p2.y + t*t*t*p3.y
+            }; push(pt);
+          }
+        } break;
+      case 'Q':
+        while(i<nums.length){
+          const p1=abs(nums[i],nums[i+1]), p2=abs(nums[i+2],nums[i+3]); i+=4;
+          for(let t=1/SEGS;t<=1+1e-6;t+=1/SEGS){
+            const u=1-t, pt={
+              x: u*u*cur.x + 2*u*t*p1.x + t*t*p2.x,
+              y: u*u*cur.y + 2*u*t*p1.y + t*t*p2.y
+            }; push(pt);
+          }
+        } break;
+      case 'A':
+        while(i<nums.length){
+          const rx=nums[i],ry=nums[i+1],rot=nums[i+2]*Math.PI/180;
+          const laf=nums[i+3],sf=nums[i+4];
+          const end=abs(nums[i+5],nums[i+6]); i+=7;
+          const arcPts = svgArcToPoints(cur, rx, ry, rot, laf, sf, end, SEGS);
+          arcPts.forEach(p=>push(p));
+        } break;
+    }
+  });
+
+  if (curPoints.length > 1) results.push(curPoints);
+  return results;
+}
+
+function svgArcToPoints(from, rx, ry, xRot, laf, sf, to, segs) {
+  // SVG arc → center parameterization
+  if (rx===0||ry===0) return [to];
+  const dx=(from.x-to.x)/2, dy=(from.y-to.y)/2;
+  const cosR=Math.cos(xRot), sinR=Math.sin(xRot);
+  const x1p=cosR*dx+sinR*dy, y1p=-sinR*dx+cosR*dy;
+  let num=rx*rx*ry*ry-rx*rx*y1p*y1p-ry*ry*x1p*x1p;
+  let den=rx*rx*y1p*y1p+ry*ry*x1p*x1p;
+  let sq=den===0?0:Math.sqrt(Math.max(0,num/den));
+  if(laf===sf) sq=-sq;
+  const cxp=sq*rx*y1p/ry, cyp=-sq*ry*x1p/rx;
+  const cx=cosR*cxp-sinR*cyp+(from.x+to.x)/2;
+  const cy=sinR*cxp+cosR*cyp+(from.y+to.y)/2;
+  const angle=(v1,v2)=>Math.atan2(v1[0]*v2[1]-v1[1]*v2[0], v1[0]*v2[0]+v1[1]*v2[1]);
+  const a1=angle([1,0],[(x1p-cxp)/rx,(y1p-cyp)/ry]);
+  let da=angle([(x1p-cxp)/rx,(y1p-cyp)/ry],[(-x1p-cxp)/rx,(-y1p-cyp)/ry]);
+  if(!sf&&da>0) da-=2*Math.PI;
+  if(sf&&da<0) da+=2*Math.PI;
+  const pts=[];
+  for(let t=1/segs;t<=1+1e-6;t+=1/segs){
+    const a=a1+da*t;
+    pts.push({
+      x: cosR*rx*Math.cos(a)-sinR*ry*Math.sin(a)+cx,
+      y: sinR*rx*Math.cos(a)+cosR*ry*Math.sin(a)+cy
+    });
+  }
+  return pts;
+}
+// ── SVG IMPORT END ──────────────────────────────────────────
+
 function addColor(hex) {
-  // 正規化（小文字）
   hex = hex.toLowerCase();
   // すでに存在する色はスキップ
   if (ALL_COLORS.includes(hex)) {

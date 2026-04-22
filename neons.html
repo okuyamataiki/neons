@@ -309,12 +309,12 @@ input[type=range]::-webkit-slider-thumb {
 /* ── 3D VIEW ── */
 #view-3d {
   position: fixed; inset: 0; z-index: 150;
-  background: #000;
+  background: transparent;
   display: none;
   pointer-events: none;
 }
 #view-3d.open { display: block; pointer-events: auto; }
-#canvas-3d { position: absolute; inset: 0; display: block; }
+#canvas-3d { position: absolute; inset: 0; display: block; background: transparent; }
 
 #btn-3d-exit {
   position: absolute; bottom: 18px; left: 16px; z-index: 10;
@@ -467,6 +467,16 @@ select option { background: #111; }
 .exp-btn:last-child { margin-bottom: 0; }
 
 /* BG color swatches in input panel */
+.bg-corner {
+  position: absolute;
+  width: 16px; height: 16px;
+  background: rgba(0,0,0,0.7);
+  border: 1.5px solid rgba(255,255,255,0.7);
+  border-radius: 2px;
+  pointer-events: auto;
+  touch-action: none;
+}
+
 .bg-item {
   display: flex; flex-direction: column; align-items: center; gap: 3px;
   cursor: pointer;
@@ -543,6 +553,33 @@ select option { background: #111; }
         <path d="M3 7.5c0-1 .8-1 1-1s1 0 1 1"/>
       </svg>
     </button>
+  </div>
+</div>
+
+<!-- BG IMAGE TRANSFORM OVERLAY -->
+<div id="bg-img-overlay" style="display:none;position:fixed;inset:0;z-index:25;pointer-events:none">
+  <!-- 変形ハンドルコンテナ -->
+  <div id="bg-img-handles" style="position:absolute;pointer-events:auto">
+    <!-- 外枠 -->
+    <div id="bg-img-frame" style="position:absolute;inset:0;border:1px solid rgba(255,255,255,0.5);box-sizing:border-box;pointer-events:none"></div>
+    <!-- 移動エリア（中央） -->
+    <div id="bg-img-move" style="position:absolute;inset:0;cursor:move;touch-action:none"></div>
+    <!-- コーナーハンドル（スケール）-->
+    <div class="bg-corner" id="bg-h-tl" style="top:-8px;left:-8px;cursor:nwse-resize"></div>
+    <div class="bg-corner" id="bg-h-tr" style="top:-8px;right:-8px;cursor:nesw-resize"></div>
+    <div class="bg-corner" id="bg-h-bl" style="bottom:-8px;left:-8px;cursor:nesw-resize"></div>
+    <div class="bg-corner" id="bg-h-br" style="bottom:-8px;right:-8px;cursor:nwse-resize"></div>
+    <!-- 回転ハンドル（上中央） -->
+    <div id="bg-h-rot" style="position:absolute;top:-36px;left:50%;transform:translateX(-50%);width:20px;height:20px;cursor:grab;display:flex;align-items:center;justify-content:center;pointer-events:auto">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="rgba(255,255,255,0.8)" stroke-width="1.4" stroke-linecap="round">
+        <path d="M13 3A6 6 0 1 0 14 8"/>
+        <polyline points="13,0 13,3 10,3"/>
+      </svg>
+    </div>
+    <!-- 確定ボタン -->
+    <div id="bg-img-confirm" style="position:absolute;bottom:-40px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,0.7);border:0.5px solid rgba(255,255,255,0.3);border-radius:3px;padding:5px 14px;font-family:'Space Mono',monospace;font-size:8px;letter-spacing:0.12em;color:rgba(255,255,255,0.7);cursor:pointer;white-space:nowrap;pointer-events:auto">
+      DONE
+    </div>
   </div>
 </div>
 
@@ -647,6 +684,19 @@ select option { background: #111; }
             onchange="setBgCustom(this.value)">
           <span class="bg-lbl">CST</span>
         </div>
+        <div class="bg-item" title="背景画像">
+          <label style="cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:2px">
+            <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" style="color:rgba(255,255,255,0.45)">
+              <rect x="2" y="2" width="14" height="14" rx="2"/>
+              <circle cx="6.5" cy="6.5" r="1.5"/>
+              <path d="M2 12l4-4 3 3 2-2 5 5"/>
+            </svg>
+            <input type="file" id="bg-image-input" accept="image/*"
+              style="position:absolute;opacity:0;width:1px;height:1px;pointer-events:none"
+              onchange="loadBgImage(this)">
+          </label>
+          <span class="bg-lbl">IMG</span>
+        </div>
       </div>
     </div>
     <div class="sec">
@@ -678,6 +728,7 @@ select option { background: #111; }
       <button class="tb-btn active" id="pat-3" onclick="setPattern(3)">×3</button>
       <button class="tb-btn" id="pat-2" onclick="setPattern(2)">×2</button>
       <button class="tb-btn" id="pat-1" onclick="setPattern(1)">×1</button>
+      <button class="tb-btn" id="pat-0" onclick="setPattern(0)" title="全点灯（アニメーションなし）" style="font-size:7px;letter-spacing:0.05em">ALL</button>
     </div>
 
     <div class="sec">
@@ -749,7 +800,8 @@ select option { background: #111; }
 
 <!-- 3D VIEW OVERLAY -->
 <div id="view-3d">
-  <canvas id="canvas-3d"></canvas>
+  <canvas id="canvas-3d-bg" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:0"></canvas>
+  <canvas id="canvas-3d" style="position:relative;z-index:1"></canvas>
   <div id="loading-3d">LOADING THREE.JS ...</div>
   <div id="label-3d-strokes"></div>
   <button id="btn-3d-exit" onclick="exit3D()">2D</button>
@@ -804,6 +856,185 @@ const area = document.getElementById('canvas-area');
 let W = 1080, H = 1920, scale = 1;
 let zoom = 1, panX = 0, panY = 0; // ピンチズーム用
 let brushSize = 3, currentColor = '#ff2244', bgColor = '#000000';
+
+// ── 背景画像 ──────────────────────────────────────────────
+let bgImg = { el: null, x: 0, y: 0, w: 0, h: 0, rot: 0, flipX: 1, base64: null };
+
+function loadBgImage(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    const img = new Image();
+    img.onload = () => {
+      // キャンバスにフィットするサイズで初期配置
+      const scale = Math.min(W / img.naturalWidth, H / img.naturalHeight);
+      bgImg.el = img;
+      bgImg.w = img.naturalWidth * scale;
+      bgImg.h = img.naturalHeight * scale;
+      bgImg.x = (W - bgImg.w) / 2;
+      bgImg.y = (H - bgImg.h) / 2;
+      bgImg.rot = 0;
+      bgImg.flipX = 1;
+      bgImg.base64 = e.target.result;
+      redrawAll(glowApplied);
+      openBgTransform();
+    };
+    img.src = e.target.result;
+  };
+  reader.readAsDataURL(file);
+  input.value = '';
+}
+
+function openBgTransform() {
+  document.getElementById('bg-img-overlay').style.display = 'block';
+  // パネルを閉じる
+  document.getElementById('panel-input').classList.remove('open');
+  updateBgHandles();
+}
+
+function closeBgTransform() {
+  document.getElementById('bg-img-overlay').style.display = 'none';
+  saveToLocal();
+}
+
+function updateBgHandles() {
+  if (!bgImg.el) return;
+  const handles = document.getElementById('bg-img-handles');
+  const area = document.getElementById('canvas-area');
+  const areaRect = area.getBoundingClientRect();
+  const canvasScale = parseFloat(CV.style.width) / W || 1;
+
+  // キャンバス座標 → スクリーン座標に変換
+  const screenX = areaRect.left + (bgImg.x + (CV.offsetLeft || 0)) * canvasScale;
+  const screenY = areaRect.top  + (bgImg.y + (CV.offsetTop  || 0)) * canvasScale;
+  const screenW = bgImg.w * canvasScale;
+  const screenH = bgImg.h * canvasScale;
+
+  handles.style.left   = screenX + 'px';
+  handles.style.top    = screenY + 'px';
+  handles.style.width  = screenW + 'px';
+  handles.style.height = screenH + 'px';
+  handles.style.transform = `rotate(${bgImg.rot}rad)`;
+  handles.style.transformOrigin = '50% 50%';
+}
+
+// ── 変形ハンドルのイベント ──
+(function() {
+  let mode = null; // 'move' | 'scale-tl' | 'scale-tr' | 'scale-bl' | 'scale-br' | 'rotate'
+  let startX, startY, startBg;
+
+  function getXY(e) {
+    const t = e.touches ? e.touches[0] : e;
+    return { x: t.clientX, y: t.clientY };
+  }
+
+  function canvasXY(screenX, screenY) {
+    const area = document.getElementById('canvas-area');
+    const rect = area.getBoundingClientRect();
+    const canvasScale = parseFloat(CV.style.width) / W || 1;
+    return {
+      x: (screenX - rect.left) / canvasScale,
+      y: (screenY - rect.top)  / canvasScale
+    };
+  }
+
+  function startDrag(e, m) {
+    if (e.cancelable) e.preventDefault();
+    mode = m;
+    const xy = getXY(e);
+    startX = xy.x; startY = xy.y;
+    startBg = { ...bgImg };
+    window.addEventListener('mousemove', onDrag);
+    window.addEventListener('mouseup', endDrag);
+    window.addEventListener('touchmove', onDrag, { passive: false });
+    window.addEventListener('touchend', endDrag);
+  }
+
+  function onDrag(e) {
+    if (!mode) return;
+    if (e.cancelable) e.preventDefault();
+    const xy = getXY(e);
+    const dx = xy.x - startX, dy = xy.y - startY;
+    const area = document.getElementById('canvas-area');
+    const canvasScale = parseFloat(CV.style.width) / W || 1;
+    const cdx = dx / canvasScale, cdy = dy / canvasScale;
+
+    if (mode === 'move') {
+      bgImg.x = startBg.x + cdx;
+      bgImg.y = startBg.y + cdy;
+    } else if (mode === 'rotate') {
+      // 回転：画像中心からのマウス角度
+      const cx = startBg.x + startBg.w / 2;
+      const cy = startBg.y + startBg.h / 2;
+      const start = canvasXY(startX, startY);
+      const cur   = canvasXY(xy.x, xy.y);
+      const a0 = Math.atan2(start.y - cy, start.x - cx);
+      const a1 = Math.atan2(cur.y   - cy, cur.x   - cx);
+      bgImg.rot = startBg.rot + (a1 - a0);
+    } else {
+      // スケール：コーナーハンドル
+      const cos = Math.cos(-bgImg.rot), sin = Math.sin(-bgImg.rot);
+      const lcdx =  cos*cdx + sin*cdy;
+      const lcdy = -sin*cdx + cos*cdy;
+      let nx = startBg.x, ny = startBg.y, nw = startBg.w, nh = startBg.h;
+      const ratio = startBg.w / startBg.h;
+      if (mode === 'scale-br') {
+        const d = (lcdx + lcdy / ratio) / 2;
+        nw = Math.max(20, startBg.w + d * 2);
+        nh = nw / ratio;
+      } else if (mode === 'scale-bl') {
+        const d = (-lcdx + lcdy / ratio) / 2;
+        nw = Math.max(20, startBg.w + d * 2);
+        nh = nw / ratio;
+        nx = startBg.x + startBg.w - nw;
+      } else if (mode === 'scale-tr') {
+        const d = (lcdx - lcdy / ratio) / 2;
+        nw = Math.max(20, startBg.w + d * 2);
+        nh = nw / ratio;
+        ny = startBg.y + startBg.h - nh;
+      } else if (mode === 'scale-tl') {
+        const d = (-lcdx - lcdy / ratio) / 2;
+        nw = Math.max(20, startBg.w + d * 2);
+        nh = nw / ratio;
+        nx = startBg.x + startBg.w - nw;
+        ny = startBg.y + startBg.h - nh;
+      }
+      bgImg.x = nx; bgImg.y = ny; bgImg.w = nw; bgImg.h = nh;
+    }
+
+    redrawAll(glowApplied);
+    updateBgHandles();
+  }
+
+  function endDrag() {
+    mode = null;
+    window.removeEventListener('mousemove', onDrag);
+    window.removeEventListener('mouseup', endDrag);
+    window.removeEventListener('touchmove', onDrag);
+    window.removeEventListener('touchend', endDrag);
+  }
+
+  // イベント登録は DOMContentLoaded 後
+  window.addEventListener('DOMContentLoaded', () => {
+    const ids = [
+      ['bg-img-move',    'move'],
+      ['bg-h-tl',        'scale-tl'],
+      ['bg-h-tr',        'scale-tr'],
+      ['bg-h-bl',        'scale-bl'],
+      ['bg-h-br',        'scale-br'],
+      ['bg-h-rot',       'rotate'],
+    ];
+    ids.forEach(([id, m]) => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.addEventListener('mousedown',  e => startDrag(e, m));
+      el.addEventListener('touchstart', e => startDrag(e, m), { passive: false });
+    });
+    document.getElementById('bg-img-confirm').addEventListener('click', closeBgTransform);
+    document.getElementById('bg-img-confirm').addEventListener('touchend', closeBgTransform);
+  });
+})();
 let flickerSpeed = 40, glowIntensity = 100;
 let fadeCurve = 'linear';
 let drawing = false, glowApplied = false;
@@ -907,6 +1138,7 @@ function replaceColorPreview(oldColor, newColor) {
   strokes.forEach(s => drawStroke(s.points, newColor, s.size, true, oc_ctx, 1));
 
   ctx.fillStyle = bgColor; ctx.fillRect(0, 0, W, H);
+  drawBgImage();
   ALL_COLORS.forEach(col => {
     const c = col === oldColor ? '__preview__' : col;
     const cache = colorCache[c]; if (!cache) return;
@@ -1004,15 +1236,16 @@ function parseSVGtoStrokes(svgText) {
   const svgEl = doc.querySelector('svg');
   if (!svgEl) throw new Error('SVG element not found');
 
-  // <style>ブロックからクラス→色のマップを作成
+  // <style>ブロックを正規表現でSVGテキストから直接抽出（DOMParser非依存）
   const classColorMap = {};
-  doc.querySelectorAll('style').forEach(styleEl => {
-    const css = styleEl.textContent;
+  const styleBlocks = svgText.match(/<style[^>]*>([\s\S]*?)<\/style>/gi) || [];
+  styleBlocks.forEach(block => {
+    const css = block.replace(/<\/?style[^>]*>/gi, '');
     const rules = css.match(/\.[a-zA-Z0-9_-]+\s*\{[^}]+\}/g) || [];
     rules.forEach(rule => {
       const clsMatch = rule.match(/\.([a-zA-Z0-9_-]+)/);
-      const fillMatch = rule.match(/fill\s*:\s*([^;}\s]+)/);
       const strokeMatch = rule.match(/stroke\s*:\s*([^;}\s]+)/);
+      const fillMatch = rule.match(/fill\s*:\s*([^;}\s]+)/);
       if (clsMatch) {
         const cls = clsMatch[1];
         if (strokeMatch && strokeMatch[1] !== 'none') classColorMap[cls] = strokeMatch[1];
@@ -1020,6 +1253,7 @@ function parseSVGtoStrokes(svgText) {
       }
     });
   });
+  console.log('[SVG] classColorMap:', classColorMap);
 
   // SVGのviewBox / width / height からスケール計算
   let vbX = 0, vbY = 0, vbW = 0, vbH = 0;
@@ -1032,7 +1266,25 @@ function parseSVGtoStrokes(svgText) {
   }
   const scaleX = vbW > 0 ? W / vbW : 1;
   const scaleY = vbH > 0 ? H / vbH : 1;
-  const sc = Math.min(scaleX, scaleY);
+
+  // viewBoxのアスペクト比からキャンバスサイズを自動検出
+  const CANVAS_PRESETS = [
+    {w:1080,h:1920,val:'1080,1920'}, {w:1080,h:1350,val:'1080,1350'},
+    {w:1080,h:1080,val:'1080,1080'}, {w:1920,h:1080,val:'1920,1080'},
+    {w:1080,h:566,val:'1080,566'}
+  ];
+  const svgRatio = vbH > 0 ? vbW / vbH : 1;
+  const matched = CANVAS_PRESETS.find(p => Math.abs(p.w/p.h - svgRatio) < 0.02);
+  if (matched && (matched.w !== W || matched.h !== H)) {
+    W = matched.w; H = matched.h;
+    CV.width = W; CV.height = H;
+    const sel = document.querySelector('#cv-tl select');
+    if (sel) [...sel.options].forEach(o => { o.selected = (o.value === matched.val); });
+    Object.keys(colorCache).forEach(k => delete colorCache[k]);
+    fillBg(); fit();
+  }
+
+  const sc = Math.min(W / vbW, H / vbH);
   const offX = (W - vbW * sc) / 2 - vbX * sc;
   const offY = (H - vbH * sc) / 2 - vbY * sc;
 
@@ -1053,6 +1305,9 @@ function parseSVGtoStrokes(svgText) {
     if (!ALL_COLORS.includes(hex)) ALL_COLORS.push(hex);
     colorSet.add(hex);
 
+    // stroke-width を読み込んでブラシサイズに変換
+    const sw = getSVGStrokeWidth(el, classColorMap, sc);
+
     const pointsList = elementToPoints(el);
     pointsList.forEach(points => {
       if (points.length < 2) return;
@@ -1061,13 +1316,39 @@ function parseSVGtoStrokes(svgText) {
         y: p.y * sc + offY
       }));
       const idx = colorStrokes[hex].length;
-      colorStrokes[hex].push({ points: scaled, size: brushSize });
+      colorStrokes[hex].push({ points: scaled, size: sw });
       drawLog.push({ id: strokeId++, color: hex, idx });
       strokeCount++;
     });
   });
 
   return { strokes: strokeCount, colors: colorSet.size };
+}
+
+function getSVGStrokeWidth(el, classColorMap, sc) {
+  let sw = null;
+  // インラインstyle
+  const style = el.getAttribute('style') || '';
+  const swStyle = style.match(/stroke-width\s*:\s*([0-9.]+)/);
+  if (swStyle) sw = parseFloat(swStyle[1]);
+  // 属性
+  if (sw === null) {
+    const attr = el.getAttribute('stroke-width');
+    if (attr) sw = parseFloat(attr);
+  }
+  // CSSクラス
+  if (sw === null) {
+    const classes = (el.getAttribute('class') || '').split(/\s+/);
+    for (const cls of classes) {
+      if (classColorMap['__sw__' + cls]) { sw = classColorMap['__sw__' + cls]; break; }
+    }
+  }
+  if (!sw || sw <= 0) return brushSize;
+  // スケーリングしてブラシサイズにマップ
+  const scaled = sw * sc;
+  if (scaled <= 8)  return 3;   // S
+  if (scaled <= 18) return 10;  // M
+  return 20;                    // L
 }
 
 function getElColor(el, classColorMap) {
@@ -1166,79 +1447,108 @@ function svgPathToPoints(d) {
   const results = [];
   let cur = {x:0,y:0}, start = {x:0,y:0};
   let curPoints = [];
-  const SEGS = 16; // ベジェ分割数
+  let lastP2 = null; // S/s コマンド用：前のベジェ第2制御点
+  const SEGS = 32;
 
   const commands = d.match(/[MmZzLlHhVvCcSsQqTtAa][^MmZzLlHhVvCcSsQqTtAa]*/g) || [];
 
   commands.forEach(cmd => {
     const type = cmd[0];
     const rel = type === type.toLowerCase() && type !== 'z' && type !== 'Z';
-    const nums = cmd.slice(1).trim().split(/[\s,]+/).map(Number).filter(v=>!isNaN(v));
+    const nums = (cmd.slice(1).match(/-?[0-9]*\.?[0-9]+(?:[eE][+-]?[0-9]+)?/g) || []).map(Number);
     let i = 0;
 
-    const abs = (dx, dy) => rel ? {x: cur.x+dx, y: cur.y+dy} : {x:dx, y:dy};
-
-    const push = p => { curPoints.push({x:p.x, y:p.y}); cur = p; };
+    const absP = (dx, dy) => rel ? {x: cur.x+dx, y: cur.y+dy} : {x:dx, y:dy};
+    const push = p => { curPoints.push({x:p.x, y:p.y}); cur = {x:p.x, y:p.y}; };
 
     switch(type.toUpperCase()) {
       case 'M':
         while (i < nums.length) {
-          if (curPoints.length > 1) { results.push(curPoints); curPoints = []; }
-          const p = abs(nums[i], nums[i+1]); i+=2;
-          if (curPoints.length === 0) { cur = p; start = p; curPoints.push({...p}); }
-          else push(p);
+          if (i > 0 || curPoints.length > 1) { if (curPoints.length > 1) { results.push(curPoints); curPoints = []; } }
+          const mp = absP(nums[i], nums[i+1]); i+=2;
+          cur = {x:mp.x, y:mp.y}; start = {x:mp.x, y:mp.y};
+          curPoints = [{x:mp.x, y:mp.y}];
         }
-        break;
+        lastP2 = null; break;
       case 'Z':
         curPoints.push({...start});
         results.push(curPoints); curPoints = []; cur = {...start};
-        break;
+        lastP2 = null; break;
       case 'L':
-        while(i<nums.length){ push(abs(nums[i],nums[i+1])); i+=2; } break;
+        while(i<nums.length){ push(absP(nums[i],nums[i+1])); i+=2; }
+        lastP2 = null; break;
       case 'H':
-        while(i<nums.length){ push(abs(nums[i], rel?0:cur.y)); i++; } break;
+        while(i<nums.length){ push({x: rel ? cur.x+nums[i] : nums[i], y: cur.y}); i++; }
+        lastP2 = null; break;
       case 'V':
-        while(i<nums.length){ push(abs(rel?0:cur.x, nums[i])); i++; } break;
+        while(i<nums.length){ push({x: cur.x, y: rel ? cur.y+nums[i] : nums[i]}); i++; }
+        lastP2 = null; break;
       case 'C':
         while(i<nums.length){
-          const p1=abs(nums[i],nums[i+1]), p2=abs(nums[i+2],nums[i+3]), p3=abs(nums[i+4],nums[i+5]); i+=6;
+          const p1=absP(nums[i],nums[i+1]), p2=absP(nums[i+2],nums[i+3]), p3=absP(nums[i+4],nums[i+5]); i+=6;
           for(let t=1/SEGS;t<=1+1e-6;t+=1/SEGS){
-            const u=1-t, pt={
+            const u=1-t;
+            push({
               x: u*u*u*cur.x + 3*u*u*t*p1.x + 3*u*t*t*p2.x + t*t*t*p3.x,
               y: u*u*u*cur.y + 3*u*u*t*p1.y + 3*u*t*t*p2.y + t*t*t*p3.y
-            }; push(pt);
+            });
           }
-          cur = p3;
+          lastP2 = {x:p2.x, y:p2.y};
         } break;
       case 'S':
         while(i<nums.length){
-          const p2=abs(nums[i],nums[i+1]), p3=abs(nums[i+2],nums[i+3]); i+=4;
-          const p1={x:2*cur.x-cur.x, y:2*cur.y-cur.y}; // 簡略
+          // 前のC/Sコマンドの制御点を反射（なければcurと同じ）
+          const p1 = lastP2
+            ? {x: 2*cur.x - lastP2.x, y: 2*cur.y - lastP2.y}
+            : {x: cur.x, y: cur.y};
+          const p2=absP(nums[i],nums[i+1]), p3=absP(nums[i+2],nums[i+3]); i+=4;
+          const c0 = {x:cur.x, y:cur.y};
           for(let t=1/SEGS;t<=1+1e-6;t+=1/SEGS){
-            const u=1-t, pt={
-              x: u*u*u*cur.x + 3*u*u*t*p1.x + 3*u*t*t*p2.x + t*t*t*p3.x,
-              y: u*u*u*cur.y + 3*u*u*t*p1.y + 3*u*t*t*p2.y + t*t*t*p3.y
-            }; push(pt);
+            const u=1-t;
+            push({
+              x: u*u*u*c0.x + 3*u*u*t*p1.x + 3*u*t*t*p2.x + t*t*t*p3.x,
+              y: u*u*u*c0.y + 3*u*u*t*p1.y + 3*u*t*t*p2.y + t*t*t*p3.y
+            });
           }
+          lastP2 = {x:p2.x, y:p2.y};
         } break;
       case 'Q':
         while(i<nums.length){
-          const p1=abs(nums[i],nums[i+1]), p2=abs(nums[i+2],nums[i+3]); i+=4;
+          const p1=absP(nums[i],nums[i+1]), p2=absP(nums[i+2],nums[i+3]); i+=4;
+          const c0={x:cur.x, y:cur.y};
           for(let t=1/SEGS;t<=1+1e-6;t+=1/SEGS){
-            const u=1-t, pt={
-              x: u*u*cur.x + 2*u*t*p1.x + t*t*p2.x,
-              y: u*u*cur.y + 2*u*t*p1.y + t*t*p2.y
-            }; push(pt);
+            const u=1-t;
+            push({
+              x: u*u*c0.x + 2*u*t*p1.x + t*t*p2.x,
+              y: u*u*c0.y + 2*u*t*p1.y + t*t*p2.y
+            });
           }
+          lastP2 = {x:p1.x, y:p1.y};
+        } break;
+      case 'T':
+        while(i<nums.length){
+          const p1 = lastP2
+            ? {x: 2*cur.x - lastP2.x, y: 2*cur.y - lastP2.y}
+            : {x: cur.x, y: cur.y};
+          const p2=absP(nums[i],nums[i+1]); i+=2;
+          const c0={x:cur.x, y:cur.y};
+          for(let t=1/SEGS;t<=1+1e-6;t+=1/SEGS){
+            const u=1-t;
+            push({ x: u*u*c0.x+2*u*t*p1.x+t*t*p2.x, y: u*u*c0.y+2*u*t*p1.y+t*t*p2.y });
+          }
+          lastP2 = {x:p1.x, y:p1.y};
         } break;
       case 'A':
         while(i<nums.length){
           const rx=nums[i],ry=nums[i+1],rot=nums[i+2]*Math.PI/180;
           const laf=nums[i+3],sf=nums[i+4];
-          const end=abs(nums[i+5],nums[i+6]); i+=7;
+          const end=absP(nums[i+5],nums[i+6]); i+=7;
           const arcPts = svgArcToPoints(cur, rx, ry, rot, laf, sf, end, SEGS);
           arcPts.forEach(p=>push(p));
-        } break;
+        }
+        lastP2 = null; break;
+      default:
+        lastP2 = null;
     }
   });
 
@@ -1310,7 +1620,21 @@ function resetZoom() {
   applyTransform();
 }
 function initCanvas() { CV.width = W; CV.height = H; fit(); fillBg(); }
-function fillBg() { ctx.fillStyle = bgColor; ctx.fillRect(0,0,W,H); }
+function fillBg() {
+  ctx.fillStyle = bgColor;
+  ctx.fillRect(0, 0, W, H);
+  drawBgImage();
+}
+
+function drawBgImage() {
+  if (!bgImg.el) return;
+  ctx.save();
+  ctx.translate(bgImg.x + bgImg.w/2, bgImg.y + bgImg.h/2);
+  ctx.rotate(bgImg.rot);
+  ctx.scale(bgImg.flipX, 1);
+  ctx.drawImage(bgImg.el, -bgImg.w/2, -bgImg.h/2, bgImg.w, bgImg.h);
+  ctx.restore();
+}
 
 function resizeCanvas(val) {
   const [w,h] = val.split(',').map(Number);
@@ -1560,6 +1884,7 @@ function rebuildAllCaches() {
 
 function redrawAll(withGlow) {
   ctx.fillStyle = bgColor; ctx.fillRect(0,0,W,H);
+  drawBgImage();
   if (withGlow || glowApplied) {
     // キャッシュから合成（alpha=1で全色描画）
     rebuildAllCaches();
@@ -1623,15 +1948,15 @@ function clearCanvas() {
 // ── NEON + SHINE 統合ボタン ──
 function toggleNeon() {
   if (!glowApplied) {
-    // OFF→ON: グロー適用 & SHINE開始
+    // OFF→ON: グロー適用 & SHINE開始（pattern=0なら静止全点灯）
     glowApplied = true;
     redrawAll(true);
-    startShine();
-  } else if (!shining) {
+    if (shinePattern !== 0) startShine();
+  } else if (!shining && shinePattern !== 0) {
     // グロー ON、SHINE OFF → SHINE再開
     startShine();
   } else {
-    // グロー ON、SHINE ON → 全OFF
+    // グロー ON → 全OFF
     glowApplied = false;
     stopShine();
     redrawAll(false);
@@ -1648,9 +1973,16 @@ function updateNeonBtn() {
 
 function setPattern(n) {
   shinePattern = n;
-  document.querySelectorAll('.pat-btn').forEach(b => b.classList.remove('active'));
-  document.getElementById('pat-' + n).classList.add('active');
-  if (shining) { stopShine(); startShine(); }
+  document.querySelectorAll('[id^="pat-"]').forEach(b => b.classList.remove('active'));
+  const btn = document.getElementById('pat-' + n);
+  if (btn) btn.classList.add('active');
+  if (n === 0) {
+    // 全点灯：アニメーション停止してフル描画
+    stopShine();
+    redrawAll(glowApplied);
+  } else {
+    if (shining) { stopShine(); startShine(); }
+  }
 }
 
 // Fade curve適用
@@ -1718,8 +2050,7 @@ function startShine() {
     const curSet = seq[step], nextSet = seq[(step+1) % S];
 
     ctx.fillStyle = bgColor; ctx.fillRect(0,0,W,H);
-
-    // キャッシュ画像をglobalAlphaで合成するだけ → ストローク数に依存しない
+    drawBgImage();
     allColors.forEach(col => {
       const oc = colorCache[col]; if (!oc) return;
       const inCur = curSet.has(col), inNext = nextSet.has(col);
@@ -1786,6 +2117,14 @@ function exportGIF() {
     const step = Math.floor(f/fpg) % S, phase = (f%fpg)/fpg;
     const curSet = seq[step], nextSet = seq[(step+1)%S];
     tc.fillStyle = bgColor; tc.fillRect(0,0,tmp.width,tmp.height);
+    if (bgImg.el) {
+      const sc = 0.5;
+      tc.save();
+      tc.translate((bgImg.x + bgImg.w/2)*sc, (bgImg.y + bgImg.h/2)*sc);
+      tc.rotate(bgImg.rot); tc.scale(bgImg.flipX, 1);
+      tc.drawImage(bgImg.el, -bgImg.w/2*sc, -bgImg.h/2*sc, bgImg.w*sc, bgImg.h*sc);
+      tc.restore();
+    }
     tc.save(); tc.scale(0.5,0.5);
     allColors.forEach(col => {
       const strokes = getCSF(col); if (!strokes.length) return;
@@ -1869,6 +2208,13 @@ async function exportPNGSeq() {
     const curSet = seq[step], nextSet = seq[(step+1)%S];
 
     tc.fillStyle = bgColor; tc.fillRect(0,0,W,H);
+    if (bgImg.el) {
+      tc.save();
+      tc.translate(bgImg.x + bgImg.w/2, bgImg.y + bgImg.h/2);
+      tc.rotate(bgImg.rot); tc.scale(bgImg.flipX, 1);
+      tc.drawImage(bgImg.el, -bgImg.w/2, -bgImg.h/2, bgImg.w, bgImg.h);
+      tc.restore();
+    }
     allColors.forEach(col => {
       const strokes = getCSF(col); if (!strokes.length) return;
       const inCur = curSet.has(col), inNext = nextSet.has(col);
@@ -1956,7 +2302,12 @@ function saveToLocal() {
       colorStrokes: JSON.parse(JSON.stringify(colorStrokes)),
       drawLog: drawLog.map(e => ({...e})),
       strokeId,
-      allColors: ALL_COLORS.slice()
+      allColors: ALL_COLORS.slice(),
+      bgImg: bgImg.base64 ? {
+        base64: bgImg.base64,
+        x: bgImg.x, y: bgImg.y, w: bgImg.w, h: bgImg.h,
+        rot: bgImg.rot, flipX: bgImg.flipX
+      } : null
     };
     localStorage.setItem(SAVE_KEY, JSON.stringify(data));
   } catch(e) { /* 容量超過などは無視 */ }
@@ -2002,6 +2353,19 @@ function loadFromLocal() {
     });
     drawLog = data.drawLog || [];
     strokeId = data.strokeId || 0;
+
+    // 背景画像を復元
+    if (data.bgImg && data.bgImg.base64) {
+      const img = new Image();
+      img.onload = () => {
+        bgImg = { el: img, base64: data.bgImg.base64,
+          x: data.bgImg.x, y: data.bgImg.y,
+          w: data.bgImg.w, h: data.bgImg.h,
+          rot: data.bgImg.rot || 0, flipX: data.bgImg.flipX || 1 };
+        redrawAll(glowApplied);
+      };
+      img.src = data.bgImg.base64;
+    }
 
     return true;
   } catch(e) { return false; }
@@ -2537,7 +2901,11 @@ function _buildTubes3D() {
   _projStrokeSamples = [];
   _wetMats3d         = [];
 
-  _scene3d.background = new THREE.Color(bgColor);
+  _scene3d.background = null;
+  _renderer3d.setClearColor(0x000000, 0); // 透明クリア
+
+  // 背景canvas（色 + 画像）を描画
+  _draw3DBg();
 
   const seen = new Set(), usedColors = [];
   drawLog.forEach(e => {
@@ -2646,7 +3014,10 @@ function _buildShineSeq() {
   const n = allColors.length;
   _3dSeq = [];
   if (!n) return;
-  if (shinePattern === 1) {
+  if (shinePattern === 0) {
+    // 全点灯：全色を含む1ステップだけ
+    _3dSeq.push(new Set(allColors));
+  } else if (shinePattern === 1) {
     allColors.forEach(c => _3dSeq.push(new Set([c])));
   } else if (shinePattern === 2) {
     for (let i=0; i<n; i++) _3dSeq.push(new Set([allColors[i], allColors[(i+1)%n]]));
@@ -2688,6 +3059,20 @@ function _mul3D(inCur, inNext, phase, step) {
 function _flicker3D() {
   const S = _3dSeq.length;
   if (!S) return;
+
+  // pattern=0（全点灯）は常時最大輝度・フレーム進行なし
+  if (shinePattern === 0) {
+    Object.keys(_flickerGroups3d).forEach(color => {
+      _flickerGroups3d[color].forEach(({ mat, kind, base }) => {
+        if (kind === 'wet') mat.uniforms.uEmissive.value = 1.0;
+        if (kind === 'glow') {
+          if (mat.uniforms) mat.uniforms.uPeak.value = base;
+          else mat.opacity = base;
+        }
+      });
+    });
+    return;
+  }
   const period  = Math.max(1, Math.round(50 * Math.pow(1 - flickerSpeed / 100, 1.4)));
   const phase   = _3dFrame / period;
   const curSet  = _3dSeq[_3dStep];
@@ -2751,7 +3136,7 @@ function _init3DRenderer() {
   const W3 = overlay.clientWidth  || window.innerWidth;
   const H3 = overlay.clientHeight || window.innerHeight;
 
-  _renderer3d = new THREE.WebGLRenderer({ canvas: canvas3d, antialias: true, preserveDrawingBuffer: true, stencil: true });
+  _renderer3d = new THREE.WebGLRenderer({ canvas: canvas3d, antialias: true, preserveDrawingBuffer: true, stencil: true, alpha: true });
   _renderer3d.setPixelRatio(Math.min(devicePixelRatio, 2));
   _renderer3d.setSize(W3, H3);
 
@@ -2809,6 +3194,32 @@ function set3DMotion(mode) {
   });
 }
 
+function _draw3DBg() {
+  const bgCanvas = document.getElementById('canvas-3d-bg');
+  if (!bgCanvas) return;
+  const overlay = document.getElementById('view-3d');
+  const w = overlay.clientWidth  || window.innerWidth;
+  const h = overlay.clientHeight || window.innerHeight;
+  if (bgCanvas.width !== w || bgCanvas.height !== h) {
+    bgCanvas.width = w; bgCanvas.height = h;
+  }
+  const bc = bgCanvas.getContext('2d');
+  bc.fillStyle = bgColor;
+  bc.fillRect(0, 0, w, h);
+  if (bgImg.el) {
+    // 3D overlay サイズに合わせてスケーリング
+    const sc = Math.min(w / W, h / H);
+    const offX = (w - W * sc) / 2;
+    const offY = (h - H * sc) / 2;
+    bc.save();
+    bc.translate(offX + (bgImg.x + bgImg.w/2) * sc, offY + (bgImg.y + bgImg.h/2) * sc);
+    bc.rotate(bgImg.rot);
+    bc.scale(bgImg.flipX, 1);
+    bc.drawImage(bgImg.el, -bgImg.w/2 * sc, -bgImg.h/2 * sc, bgImg.w * sc, bgImg.h * sc);
+    bc.restore();
+  }
+}
+
 function _animate3D() {
   _3dAnimId = requestAnimationFrame(_animate3D);
   const t = performance.now() / 1000 * _3dSpeedMul;
@@ -2861,6 +3272,7 @@ function _animate3D() {
   });
 
   _renderer3d.clearStencil();
+  _draw3DBg();
   _renderer3d.render(_scene3d, _camera3d);
 }
 

@@ -3679,20 +3679,37 @@ function export3DStill(type) {
   const canvas   = document.getElementById('canvas-3d');
   const origW    = canvas.width, origH = canvas.height;
 
-  _renderer3d.setSize(w, h);
-  _camera3d.aspect = w / h;
-  _camera3d.updateProjectionMatrix();
-  _renderer3d.render(_scene3d, _camera3d);
+  // iOSはWebGL高解像度リサイズで失敗するため
+  // スクリーンサイズでレンダリングしてから2Dキャンバスで拡大する
+  const isHighRes = (w !== origW || h !== origH);
 
-  const link = document.createElement('a');
-  const ts   = new Date().toISOString().slice(0,19).replace(/[:T]/g,'-');
-  link.download = 'NEONS_3D_' + ts + '.' + type;
-  link.href = canvas.toDataURL(type === 'jpg' ? 'image/jpeg' : 'image/png', 0.97);
-  link.click();
+  if (isHighRes) {
+    // 現在のサイズでレンダリング
+    _renderer3d.render(_scene3d, _camera3d);
 
-  _renderer3d.setSize(origW, origH);
-  _camera3d.aspect = origW / origH;
-  _camera3d.updateProjectionMatrix();
+    // オフスクリーン2Dキャンバスで目標解像度にスケーリング
+    const offscreen = document.createElement('canvas');
+    offscreen.width  = w;
+    offscreen.height = h;
+    const oc = offscreen.getContext('2d');
+    oc.imageSmoothingEnabled = true;
+    oc.imageSmoothingQuality = 'high';
+    oc.drawImage(canvas, 0, 0, w, h);
+
+    const link = document.createElement('a');
+    const ts   = new Date().toISOString().slice(0,19).replace(/[:T]/g,'-');
+    link.download = 'NEONS_3D_' + ts + '.' + type;
+    link.href = offscreen.toDataURL(type === 'jpg' ? 'image/jpeg' : 'image/png', 0.97);
+    link.click();
+  } else {
+    // スクリーンサイズはそのまま書き出し
+    _renderer3d.render(_scene3d, _camera3d);
+    const link = document.createElement('a');
+    const ts   = new Date().toISOString().slice(0,19).replace(/[:T]/g,'-');
+    link.download = 'NEONS_3D_' + ts + '.' + type;
+    link.href = canvas.toDataURL(type === 'jpg' ? 'image/jpeg' : 'image/png', 0.97);
+    link.click();
+  }
 }
 
 let _3dRecorder = null, _3dChunks = [];

@@ -1747,6 +1747,7 @@ CV.addEventListener('mouseup', () => {
     colorStrokes[strokeCol].push({ points: smoothStroke([...curStroke]), size:brushSize });
     drawLog.push({ id:strokeId++, color:strokeCol, idx });
     rebuildCache(strokeCol);
+    redrawAll(glowApplied);
     updateColorPalette();
     saveToLocal();
   }
@@ -1761,6 +1762,7 @@ CV.addEventListener('mouseleave', () => {
     colorStrokes[strokeCol].push({ points: smoothStroke([...curStroke]), size:brushSize });
     drawLog.push({ id:strokeId++, color:strokeCol, idx });
     rebuildCache(strokeCol);
+    redrawAll(glowApplied);
     updateColorPalette();
     saveToLocal();
   }
@@ -1845,6 +1847,7 @@ CV.addEventListener('touchend', e => {
     colorStrokes[strokeCol].push({ points: smoothStroke([...curStroke]), size:brushSize });
     drawLog.push({ id:strokeId++, color:strokeCol, idx });
     rebuildCache(strokeCol);
+    redrawAll(glowApplied);
     updateColorPalette();
     saveToLocal();
   }
@@ -2723,17 +2726,23 @@ function smoothStroke(points) {
   let totalLen = 0;
   for (let i = 1; i < pts.length; i++)
     totalLen += Math.hypot(pts[i].x-pts[i-1].x, pts[i].y-pts[i-1].y);
-  const step = Math.max(4, totalLen / Math.min(200, Math.max(20, pts.length)));
-  const res = [pts[0]]; let acc = 0;
+  const target = Math.min(200, Math.max(20, pts.length));
+  const step = totalLen / target;
+  const res = [pts[0]]; let acc = 0, next = step;
   for (let i = 1; i < pts.length; i++) {
     const segLen = Math.hypot(pts[i].x-pts[i-1].x, pts[i].y-pts[i-1].y);
+    while (acc + segLen >= next && res.length < target) {
+      const t = (next - acc) / segLen;
+      res.push({ x: pts[i-1].x + t*(pts[i].x-pts[i-1].x), y: pts[i-1].y + t*(pts[i].y-pts[i-1].y) });
+      next += step;
+    }
     acc += segLen;
-    if (acc >= step * res.length) res.push({...pts[i]});
   }
-  if (res[res.length-1] !== pts[pts.length-1]) res.push({...pts[pts.length-1]});
+  if (res.length < 2) res.push({...pts[pts.length-1]});
+  else res[res.length-1] = {...pts[pts.length-1]};
   pts = res;
 
-  // 3. 再スムージング × 2パス
+  // 3. 仕上げ × 2パス
   for (let pass = 0; pass < 2; pass++) {
     const n = [pts[0]];
     for (let i = 1; i < pts.length - 1; i++) {

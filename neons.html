@@ -3194,6 +3194,25 @@ function set3DMotion(mode) {
   });
 }
 
+function _draw3DBgAt(w, h) {
+  const bgCanvas = document.getElementById('canvas-3d-bg');
+  if (!bgCanvas) return;
+  bgCanvas.width = w; bgCanvas.height = h;
+  const bc = bgCanvas.getContext('2d');
+  bc.fillStyle = bgColor;
+  bc.fillRect(0, 0, w, h);
+  if (bgImg.el) {
+    const sc = Math.min(w / W, h / H);
+    const offX = (w - W * sc) / 2;
+    const offY = (h - H * sc) / 2;
+    bc.save();
+    bc.translate(offX + (bgImg.x + bgImg.w/2) * sc, offY + (bgImg.y + bgImg.h/2) * sc);
+    bc.rotate(bgImg.rot); bc.scale(bgImg.flipX, 1);
+    bc.drawImage(bgImg.el, -bgImg.w/2 * sc, -bgImg.h/2 * sc, bgImg.w * sc, bgImg.h * sc);
+    bc.restore();
+  }
+}
+
 function _draw3DBg() {
   const bgCanvas = document.getElementById('canvas-3d-bg');
   if (!bgCanvas) return;
@@ -3274,6 +3293,15 @@ function _animate3D() {
   _renderer3d.clearStencil();
   _draw3DBg();
   _renderer3d.render(_scene3d, _camera3d);
+
+  // MP4録画中：背景＋3Dを合成キャンバスに転写
+  if (_3dMergedCanvas && _3dMergedCtx) {
+    const bgCanvas = document.getElementById('canvas-3d-bg');
+    const canvas3d = document.getElementById('canvas-3d');
+    _3dMergedCtx.clearRect(0, 0, _3dMergedCanvas.width, _3dMergedCanvas.height);
+    if (bgCanvas) _3dMergedCtx.drawImage(bgCanvas, 0, 0, _3dMergedCanvas.width, _3dMergedCanvas.height);
+    _3dMergedCtx.drawImage(canvas3d, 0, 0, _3dMergedCanvas.width, _3dMergedCanvas.height);
+  }
 }
 
 // ── enter3D ─────────────────────────────────────────────────────
@@ -3347,12 +3375,21 @@ function export3DStill(type) {
   _renderer3d.setSize(w, h);
   _camera3d.aspect = w / h;
   _camera3d.updateProjectionMatrix();
+  _draw3DBgAt(w, h); // 背景を高解像度で描画
   _renderer3d.render(_scene3d, _camera3d);
+
+  // 背景＋3Dを合成して書き出し
+  const merged = document.createElement('canvas');
+  merged.width = w; merged.height = h;
+  const mc = merged.getContext('2d');
+  const bgCanvas = document.getElementById('canvas-3d-bg');
+  if (bgCanvas) mc.drawImage(bgCanvas, 0, 0, w, h);
+  mc.drawImage(canvas, 0, 0, w, h);
 
   const link = document.createElement('a');
   const ts   = new Date().toISOString().slice(0,19).replace(/[:T]/g,'-');
   link.download = 'NEONS_3D_' + ts + '.' + type;
-  link.href = canvas.toDataURL(type === 'jpg' ? 'image/jpeg' : 'image/png', 0.97);
+  link.href = merged.toDataURL(type === 'jpg' ? 'image/jpeg' : 'image/png', 0.97);
   link.click();
 
   // 元に戻す
@@ -3362,6 +3399,7 @@ function export3DStill(type) {
 }
 
 let _3dRecorder = null, _3dChunks = [];
+let _3dMergedCanvas = null, _3dMergedCtx = null;
 
 function toggle3DMP4() {
   const btn = document.getElementById('btn-3d-mp4');
@@ -3380,6 +3418,14 @@ function toggle3DMP4() {
   _camera3d.aspect = w / h;
   _camera3d.updateProjectionMatrix();
 
+  // 合成キャンバス（背景＋3D）を作成してそこからキャプチャ
+  const mergedCanvas = document.createElement('canvas');
+  mergedCanvas.width = w; mergedCanvas.height = h;
+  const mc = mergedCanvas.getContext('2d');
+  // アニメループに合成描画を挟む
+  _3dMergedCanvas = mergedCanvas;
+  _3dMergedCtx = mc;
+
   _3dChunks = [];
   const mime = [
     'video/mp4;codecs="avc1.42E01E"',
@@ -3394,11 +3440,12 @@ function toggle3DMP4() {
   const is4K   = (w >= 3840);
   const bps    = is4K ? 60_000_000 : isHD ? 20_000_000 : 8_000_000;
 
-  const stream = canvas.captureStream(fps);
+  const stream = mergedCanvas.captureStream(fps);
   _3dRecorder  = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: bps });
   _3dRecorder.ondataavailable = e => { if(e.data.size) _3dChunks.push(e.data); };
   _3dRecorder.onstop = () => {
     // 元のサイズに戻す
+    _3dMergedCanvas = null; _3dMergedCtx = null;
     _renderer3d.setSize(origW, origH);
     _camera3d.aspect = origW / origH;
     _camera3d.updateProjectionMatrix();

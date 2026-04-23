@@ -584,12 +584,14 @@ select option { background: #111; }
       </svg>
     </div>
   </div>
-  <div id="sel-delete" style="display:none;position:fixed;bottom:28px;left:50%;transform:translateX(-50%);
-    background:rgba(0,0,0,0.75);border:0.5px solid rgba(255,80,80,0.5);border-radius:3px;
-    padding:7px 20px;font-family:'Space Mono',monospace;font-size:9px;letter-spacing:0.15em;
-    color:rgba(255,80,80,0.8);cursor:pointer;white-space:nowrap;z-index:26;pointer-events:auto">DELETE</div>
   <div id="sel-rubber" style="position:absolute;border:1px dashed rgba(255,255,255,0.5);background:rgba(255,255,255,0.04);box-sizing:border-box;display:none;pointer-events:none"></div>
 </div>
+
+<!-- SELECT DELETE BUTTON (outside overlay) -->
+<div id="sel-delete" style="display:none;position:fixed;bottom:28px;left:50%;transform:translateX(-50%);
+  background:rgba(0,0,0,0.75);border:0.5px solid rgba(255,80,80,0.5);border-radius:3px;
+  padding:7px 20px;font-family:'Space Mono',monospace;font-size:9px;letter-spacing:0.15em;
+  color:rgba(255,80,80,0.8);cursor:pointer;white-space:nowrap;z-index:30;touch-action:manipulation">DELETE</div>
 
 <!-- BG IMAGE TRANSFORM OVERLAY -->
 <div id="bg-img-overlay" style="display:none;position:fixed;inset:0;z-index:25;touch-action:none">
@@ -2685,8 +2687,9 @@ window.addEventListener('DOMContentLoaded', ()=>{
   const rotEl=document.getElementById('sel-rot');
   rotEl.addEventListener('mousedown',  e=>{ e.stopPropagation();e.preventDefault();_selRotateStart(e.clientX,e.clientY); });
   rotEl.addEventListener('touchstart', e=>{ e.stopPropagation();e.preventDefault();_selRotateStart(e.touches[0].clientX,e.touches[0].clientY); },{passive:false});
-  document.getElementById('sel-delete').addEventListener('click', deleteSelected);
-  document.getElementById('sel-delete').addEventListener('touchend', e=>{ e.preventDefault(); deleteSelected(); });
+  const delBtn = document.getElementById('sel-delete');
+  delBtn.addEventListener('click',      deleteSelected);
+  delBtn.addEventListener('touchstart', e => { e.preventDefault(); e.stopPropagation(); deleteSelected(); }, { passive: false });
 });
 document.addEventListener('keydown', e=>{
   if(selectMode&&(e.key==='Delete'||e.key==='Backspace')&&selectedIds.length){ e.preventDefault(); deleteSelected(); }

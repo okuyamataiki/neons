@@ -679,14 +679,23 @@ select option { background: #111; }
     <div class="sec">
       <div class="lbl">② SIZE</div>
       <div style="display:flex;flex-direction:column;gap:4px">
-        <button class="size-btn active" id="sz-s" onclick="setSize(10,this)">
-          <span class="sz-dot" style="width:10px;height:10px;background:currentColor;border-radius:50%;display:inline-block;vertical-align:middle"></span>
+        <button class="size-btn" id="sz-6" onclick="setSize(90,this)">
+          <span class="sz-dot" style="width:26px;height:26px;background:currentColor;border-radius:50%;display:inline-block;vertical-align:middle"></span>
         </button>
-        <button class="size-btn" id="sz-m" onclick="setSize(20,this)">
+        <button class="size-btn" id="sz-5" onclick="setSize(70,this)">
+          <span class="sz-dot" style="width:22px;height:22px;background:currentColor;border-radius:50%;display:inline-block;vertical-align:middle"></span>
+        </button>
+        <button class="size-btn" id="sz-4" onclick="setSize(50,this)">
           <span class="sz-dot" style="width:18px;height:18px;background:currentColor;border-radius:50%;display:inline-block;vertical-align:middle"></span>
         </button>
-        <button class="size-btn" id="sz-l" onclick="setSize(30,this)">
-          <span class="sz-dot" style="width:26px;height:26px;background:currentColor;border-radius:50%;display:inline-block;vertical-align:middle"></span>
+        <button class="size-btn" id="sz-3" onclick="setSize(30,this)">
+          <span class="sz-dot" style="width:14px;height:14px;background:currentColor;border-radius:50%;display:inline-block;vertical-align:middle"></span>
+        </button>
+        <button class="size-btn" id="sz-2" onclick="setSize(20,this)">
+          <span class="sz-dot" style="width:10px;height:10px;background:currentColor;border-radius:50%;display:inline-block;vertical-align:middle"></span>
+        </button>
+        <button class="size-btn active" id="sz-1" onclick="setSize(10,this)">
+          <span class="sz-dot" style="width:6px;height:6px;background:currentColor;border-radius:50%;display:inline-block;vertical-align:middle"></span>
         </button>
       </div>
     </div>
@@ -698,22 +707,16 @@ select option { background: #111; }
           <span class="bg-lbl">BLK</span>
         </div>
         <div class="bg-item">
-          <div class="bg-dot" data-bg="#05050f" onclick="setBg(this)" style="background:#05050f" title="BLUE-BLACK"></div>
-          <span class="bg-lbl">B-BK</span>
-        </div>
-        <div class="bg-item">
-          <div class="bg-dot" data-bg="#0f0505" onclick="setBg(this)" style="background:#0f0505" title="RED-BLACK"></div>
-          <span class="bg-lbl">R-BK</span>
-        </div>
-        <div class="bg-item">
           <div class="bg-dot" data-bg="#0a0a0a" onclick="setBg(this)" style="background:#0a0a0a" title="DARK GRAY"></div>
           <span class="bg-lbl">GRY</span>
         </div>
-        <div class="bg-item" title="カスタムカラー">
-          <input type="color" id="bg-picker" value="#000000"
-            style="width:18px;height:18px;border:none;padding:0;background:transparent;cursor:pointer;border-radius:50%;overflow:hidden"
-            onchange="setBgCustom(this.value)">
-          <span class="bg-lbl">CST</span>
+        <div class="bg-item" title="カスタムカラー" style="flex-direction:column;align-items:center;gap:3px">
+          <label style="cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:3px">
+            <input type="color" id="bg-picker" value="#000000"
+              style="width:18px;height:18px;border:none;padding:0;background:transparent;cursor:pointer;border-radius:3px;overflow:hidden"
+              onchange="setBgCustom(this.value)">
+            <span class="bg-lbl">CST</span>
+          </label>
         </div>
         <div class="bg-item" title="背景画像">
           <label style="cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:2px">
@@ -1799,15 +1802,16 @@ function setSize(val, el) {
 }
 
 function updateSizeDots() {
-  // ブラシの●を画面上の実寸で表示
-  const sizes = [10, 20, 30];
-  const ids = ['sz-s', 'sz-m', 'sz-l'];
+  const sizes = [90, 70, 50, 30, 20, 10];
+  const ids   = ['sz-6','sz-5','sz-4','sz-3','sz-2','sz-1'];
   ids.forEach((id, i) => {
     const btn = document.getElementById(id);
     if (!btn) return;
-    const px = Math.round(sizes[i] * scale);
+    const px = Math.max(2, Math.round(sizes[i] * scale));
+    const cap = 26; // パネル幅に合わせて上限
+    const disp = Math.min(px, cap);
     const dot = btn.querySelector('.sz-dot');
-    if (dot) { dot.style.width = px + 'px'; dot.style.height = px + 'px'; }
+    if (dot) { dot.style.width = disp + 'px'; dot.style.height = disp + 'px'; }
   });
 }
 

@@ -309,12 +309,14 @@ input[type=range]::-webkit-slider-thumb {
 /* ── 3D VIEW ── */
 #view-3d {
   position: fixed; inset: 0; z-index: 150;
-  background: #000;
+  background: #2a2a2a;
   display: none;
   pointer-events: none;
+  align-items: center;
+  justify-content: center;
 }
-#view-3d.open { display: block; pointer-events: auto; }
-#canvas-3d { position: absolute; inset: 0; display: block; }
+#view-3d.open { display: flex; pointer-events: auto; }
+#canvas-3d { display: block; flex-shrink: 0; }
 
 #btn-3d-exit {
   position: absolute; bottom: 18px; left: 16px; z-index: 10;
@@ -726,6 +728,18 @@ select option { background: #111; }
           </label>
           <span class="bg-lbl">IMG</span>
         </div>
+        <div class="bg-item" title="背景動画">
+          <label style="cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:2px">
+            <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" style="color:rgba(255,255,255,0.45)">
+              <rect x="1" y="3" width="16" height="12" rx="2"/>
+              <path d="M7 6.5l5 2.5-5 2.5z" fill="currentColor" stroke="none"/>
+            </svg>
+            <input type="file" id="bg-video-input" accept="video/*"
+              style="position:absolute;opacity:0;width:1px;height:1px;pointer-events:none"
+              onchange="loadBgVideo(this)">
+          </label>
+          <span class="bg-lbl">VID</span>
+        </div>
       </div>
     </div>
     <div class="sec">
@@ -829,7 +843,7 @@ select option { background: #111; }
 
 <!-- 3D VIEW OVERLAY -->
 <div id="view-3d">
-  <canvas id="canvas-3d" style="position:absolute;inset:0;display:block"></canvas>
+  <canvas id="canvas-3d"></canvas>
   <div id="loading-3d">LOADING THREE.JS ...</div>
   <div id="label-3d-strokes"></div>
   <button id="btn-3d-exit" onclick="exit3D()">2D</button>
@@ -887,6 +901,83 @@ let brushSize = 3, currentColor = '#ff2244', bgColor = '#000000';
 
 // ── 背景画像 ──────────────────────────────────────────────
 let bgImg = { el: null, x: 0, y: 0, w: 0, h: 0, rot: 0, flipX: 1, base64: null };
+
+// ── 背景動画 ──────────────────────────────────────────────
+let bgVideo = { el: null, x: 0, y: 0, w: 0, h: 0, rot: 0, flipX: 1, rafId: null };
+
+function loadBgVideo(input) {
+  const file = input.files[0];
+  if (!file) return;
+  stopBgVideo();
+
+  const vid = document.createElement('video');
+  vid.muted = true;
+  vid.loop = true;
+  vid.playsInline = true;
+  vid.setAttribute('playsinline', '');
+  // オフスクリーン配置（適切なサイズでフレームデコードを有効化）
+  vid.style.position = 'fixed';
+  vid.style.left = '-9999px';
+  vid.style.top = '0';
+  vid.style.width = '640px';
+  vid.style.height = '360px';
+  document.body.appendChild(vid);
+
+  vid.addEventListener('loadedmetadata', () => {
+    const sc = Math.min(W / vid.videoWidth, H / vid.videoHeight);
+    bgVideo.w = vid.videoWidth  * sc;
+    bgVideo.h = vid.videoHeight * sc;
+    bgVideo.x = (W - bgVideo.w) / 2;
+    bgVideo.y = (H - bgVideo.h) / 2;
+    bgVideo.rot = 0;
+    bgVideo.flipX = 1;
+  });
+
+  vid.addEventListener('canplay', () => {
+    vid.play().catch(() => {});
+    bgImg = { el: null, x: 0, y: 0, w: 0, h: 0, rot: 0, flipX: 1, base64: null };
+    bgVideo.el = vid;
+    startBgVideoLoop();
+    openBgTransform();
+  }, { once: true });
+
+  vid.src = URL.createObjectURL(file);
+  input.value = '';
+}
+
+function startBgVideoLoop() {
+  stopBgVideoLoop();
+  const tick = () => {
+    bgVideo.rafId = requestAnimationFrame(tick);
+    if (!bgVideo.el || bgVideo.el.readyState < 2) return;
+    if (shining) return; // SHINEループが描画担当（shining=trueのときSHINEループでdrawBgVideo済み）
+    redrawAll(glowApplied);
+  };
+  bgVideo.rafId = requestAnimationFrame(tick);
+}
+
+function stopBgVideoLoop() {
+  if (bgVideo.rafId) { cancelAnimationFrame(bgVideo.rafId); bgVideo.rafId = null; }
+}
+
+function stopBgVideo() {
+  stopBgVideoLoop();
+  if (bgVideo.el) {
+    bgVideo.el.pause();
+    if (bgVideo.el.parentNode) bgVideo.el.parentNode.removeChild(bgVideo.el);
+    bgVideo.el = null;
+  }
+}
+
+function drawBgVideo() {
+  if (!bgVideo.el || bgVideo.el.readyState < 1) return;
+  ctx.save();
+  ctx.translate(bgVideo.x + bgVideo.w/2, bgVideo.y + bgVideo.h/2);
+  ctx.rotate(bgVideo.rot);
+  ctx.scale(bgVideo.flipX, 1);
+  ctx.drawImage(bgVideo.el, -bgVideo.w/2, -bgVideo.h/2, bgVideo.w, bgVideo.h);
+  ctx.restore();
+}
 
 function loadBgImage(input) {
   const file = input.files[0];
@@ -952,18 +1043,24 @@ function closeBgTransform() {
       angle: Math.atan2(b.y-a.y, b.x-a.x) };
   }
 
+
+  // bgImg / bgVideo どちらがアクティブかを返す
+  function activeBg() { return bgVideo.el ? bgVideo : bgImg; }
+  function setActiveBg(obj) {
+    if (bgVideo.el) { bgVideo.x=obj.x; bgVideo.y=obj.y; bgVideo.w=obj.w; bgVideo.h=obj.h; bgVideo.rot=obj.rot; }
+    else { bgImg.x=obj.x; bgImg.y=obj.y; bgImg.w=obj.w; bgImg.h=obj.h; bgImg.rot=obj.rot; }
+  }
+
   function onTouchStart(e) {
     e.preventDefault();
-    startBg = { ...bgImg };
+    startBg = { ...activeBg() };
     const info = getTouchInfo(e);
     if (!info) return;
     if (info.b) {
-      // 2本指
       startMid = toCanvas(info.mid.x, info.mid.y);
       startDist = info.dist;
       startAngle = info.angle;
     } else {
-      // 1本指
       startMid = toCanvas(info.a.x, info.a.y);
     }
   }
@@ -973,41 +1070,38 @@ function closeBgTransform() {
     if (!startBg) return;
     const info = getTouchInfo(e);
     if (!info) return;
+    const bg = { ...startBg };
 
     if (info.b && startDist) {
-      // 2本指: 移動＋スケール＋回転
       const cur = toCanvas(info.mid.x, info.mid.y);
       const scale = info.dist / startDist;
       const dAngle = info.angle - startAngle;
-
       const cx = startBg.x + startBg.w / 2;
       const cy = startBg.y + startBg.h / 2;
-      bgImg.w = Math.max(20, startBg.w * scale);
-      bgImg.h = Math.max(20, startBg.h * scale);
-      bgImg.x = cx - bgImg.w / 2 + (cur.x - startMid.x);
-      bgImg.y = cy - bgImg.h / 2 + (cur.y - startMid.y);
-      bgImg.rot = startBg.rot + dAngle;
+      bg.w = Math.max(20, startBg.w * scale);
+      bg.h = Math.max(20, startBg.h * scale);
+      bg.x = cx - bg.w / 2 + (cur.x - startMid.x);
+      bg.y = cy - bg.h / 2 + (cur.y - startMid.y);
+      bg.rot = startBg.rot + dAngle;
     } else if (!info.b) {
-      // 1本指: 移動
       const cur = toCanvas(info.a.x, info.a.y);
-      bgImg.x = startBg.x + (cur.x - startMid.x);
-      bgImg.y = startBg.y + (cur.y - startMid.y);
+      bg.x = startBg.x + (cur.x - startMid.x);
+      bg.y = startBg.y + (cur.y - startMid.y);
     }
+    setActiveBg(bg);
     redrawAll(glowApplied);
   }
 
   function onTouchEnd(e) {
     if (e.touches.length === 0) { startBg = null; startDist = null; }
     else {
-      // 指が1本に減った → 残った指でリセット
-      startBg = { ...bgImg };
+      startBg = { ...activeBg() };
       const info = getTouchInfo(e);
       if (info) startMid = toCanvas(info.a.x, info.a.y);
       startDist = null;
     }
   }
 
-  // ── マウス（PC）──
   let mouseDown = false, altDown = false;
   let mStartBg = null, mStartPos = null, mStartAngle = null;
 
@@ -1018,45 +1112,39 @@ function closeBgTransform() {
     if (e.button !== 0) return;
     e.preventDefault();
     mouseDown = true;
-    mStartBg  = { ...bgImg };
+    mStartBg  = { ...activeBg() };
     mStartPos = toCanvas(e.clientX, e.clientY);
     if (altDown) {
-      // Alt+ドラッグ → 回転
-      const cx = bgImg.x + bgImg.w / 2;
-      const cy = bgImg.y + bgImg.h / 2;
-      mStartAngle = Math.atan2(mStartPos.y - cy, mStartPos.x - cx) - bgImg.rot;
+      const bg = activeBg();
+      const cx = bg.x + bg.w / 2, cy = bg.y + bg.h / 2;
+      mStartAngle = Math.atan2(mStartPos.y - cy, mStartPos.x - cx) - bg.rot;
     }
   }
 
   function onMouseMove(e) {
     if (!mouseDown || !mStartBg) return;
     const cur = toCanvas(e.clientX, e.clientY);
+    const bg = { ...mStartBg };
     if (altDown && mStartAngle !== null) {
-      // 回転
-      const cx = mStartBg.x + mStartBg.w / 2;
-      const cy = mStartBg.y + mStartBg.h / 2;
-      bgImg.rot = Math.atan2(cur.y - cy, cur.x - cx) - mStartAngle;
+      const cx = mStartBg.x + mStartBg.w / 2, cy = mStartBg.y + mStartBg.h / 2;
+      bg.rot = Math.atan2(cur.y - cy, cur.x - cx) - mStartAngle;
     } else {
-      // 移動
-      bgImg.x = mStartBg.x + (cur.x - mStartPos.x);
-      bgImg.y = mStartBg.y + (cur.y - mStartPos.y);
+      bg.x = mStartBg.x + (cur.x - mStartPos.x);
+      bg.y = mStartBg.y + (cur.y - mStartPos.y);
     }
+    setActiveBg(bg);
     redrawAll(glowApplied);
   }
 
-  function onMouseUp() {
-    mouseDown = false; mStartBg = null; mStartAngle = null;
-  }
+  function onMouseUp() { mouseDown = false; mStartBg = null; mStartAngle = null; }
 
   function onWheel(e) {
     e.preventDefault();
     const factor = e.deltaY < 0 ? 1.05 : 0.95;
-    const cx = bgImg.x + bgImg.w / 2;
-    const cy = bgImg.y + bgImg.h / 2;
-    bgImg.w = Math.max(20, bgImg.w * factor);
-    bgImg.h = Math.max(20, bgImg.h * factor);
-    bgImg.x = cx - bgImg.w / 2;
-    bgImg.y = cy - bgImg.h / 2;
+    const bg = activeBg();
+    const cx = bg.x + bg.w / 2, cy = bg.y + bg.h / 2;
+    const nw = Math.max(20, bg.w * factor), nh = Math.max(20, bg.h * factor);
+    setActiveBg({ ...bg, w: nw, h: nh, x: cx - nw/2, y: cy - nh/2 });
     redrawAll(glowApplied);
   }
 
@@ -1663,6 +1751,7 @@ function fillBg() {
   ctx.fillStyle = bgColor;
   ctx.fillRect(0, 0, W, H);
   drawBgImage();
+  drawBgVideo();
 }
 
 function drawBgImage() {
@@ -1930,6 +2019,7 @@ function rebuildAllCaches() {
 function redrawAll(withGlow) {
   ctx.fillStyle = bgColor; ctx.fillRect(0,0,W,H);
   drawBgImage();
+  drawBgVideo();
   if (withGlow || glowApplied) {
     // キャッシュから合成（alpha=1で全色描画）
     rebuildAllCaches();
@@ -2069,7 +2159,11 @@ function getUsedColors() {
 
 function startShine() {
   const allColors = getUsedColors();
-  if (allColors.length === 0) return;
+  if (allColors.length === 0) {
+    // ストロークなしでも動画背景があれば shining フラグだけ立てる
+    if (bgVideo.el) { shining = true; updateNeonBtn(); }
+    return;
+  }
   shining = true; updateNeonBtn();
 
   // キャッシュを事前構築
@@ -2096,6 +2190,7 @@ function startShine() {
 
     ctx.fillStyle = bgColor; ctx.fillRect(0,0,W,H);
     drawBgImage();
+    drawBgVideo();
     allColors.forEach(col => {
       const oc = colorCache[col]; if (!oc) return;
       const inCur = curSet.has(col), inNext = nextSet.has(col);
@@ -2103,9 +2198,8 @@ function startShine() {
       if (mul < 0.01) return;
       ctx.save(); ctx.globalAlpha = mul; ctx.drawImage(oc, 0, 0); ctx.restore();
     });
-
-    frame++;
     if (frame >= period) { frame = 0; step = (step+1) % S; }
+    else frame++;
     shineAF = requestAnimationFrame(tick);
   }
   tick();
@@ -2168,6 +2262,14 @@ function exportGIF() {
       tc.translate((bgImg.x + bgImg.w/2)*sc, (bgImg.y + bgImg.h/2)*sc);
       tc.rotate(bgImg.rot); tc.scale(bgImg.flipX, 1);
       tc.drawImage(bgImg.el, -bgImg.w/2*sc, -bgImg.h/2*sc, bgImg.w*sc, bgImg.h*sc);
+      tc.restore();
+    }
+    if (bgVideo.el && bgVideo.el.readyState >= 2) {
+      const sc = 0.5;
+      tc.save();
+      tc.translate((bgVideo.x + bgVideo.w/2)*sc, (bgVideo.y + bgVideo.h/2)*sc);
+      tc.rotate(bgVideo.rot); tc.scale(bgVideo.flipX, 1);
+      tc.drawImage(bgVideo.el, -bgVideo.w/2*sc, -bgVideo.h/2*sc, bgVideo.w*sc, bgVideo.h*sc);
       tc.restore();
     }
     tc.save(); tc.scale(0.5,0.5);
@@ -2258,6 +2360,13 @@ async function exportPNGSeq() {
       tc.translate(bgImg.x + bgImg.w/2, bgImg.y + bgImg.h/2);
       tc.rotate(bgImg.rot); tc.scale(bgImg.flipX, 1);
       tc.drawImage(bgImg.el, -bgImg.w/2, -bgImg.h/2, bgImg.w, bgImg.h);
+      tc.restore();
+    }
+    if (bgVideo.el && bgVideo.el.readyState >= 2) {
+      tc.save();
+      tc.translate(bgVideo.x + bgVideo.w/2, bgVideo.y + bgVideo.h/2);
+      tc.rotate(bgVideo.rot); tc.scale(bgVideo.flipX, 1);
+      tc.drawImage(bgVideo.el, -bgVideo.w/2, -bgVideo.h/2, bgVideo.w, bgVideo.h);
       tc.restore();
     }
     allColors.forEach(col => {
@@ -3506,23 +3615,33 @@ function _flicker3D() {
   }
 }
 
+// 2DキャンバスのW:H比率を維持しながら画面内に収まる3Dサイズを計算
+function _get3DCanvasSize() {
+  const vw = window.innerWidth, vh = window.innerHeight;
+  const aspect = W / H; // 2Dキャンバスと同じアスペクト比
+  let cw, ch;
+  if (vw / vh > aspect) {
+    ch = vh; cw = Math.round(vh * aspect);
+  } else {
+    cw = vw; ch = Math.round(vw / aspect);
+  }
+  return { cw, ch };
+}
+
 // ── レンダラー初期化（初回のみ） ─────────────────────────────────
 function _init3DRenderer() {
   const canvas3d = document.getElementById('canvas-3d');
   const overlay  = document.getElementById('view-3d');
-  const W3 = overlay.clientWidth  || window.innerWidth;
-  const H3 = overlay.clientHeight || window.innerHeight;
+  const { cw, ch } = _get3DCanvasSize();
 
   _renderer3d = new THREE.WebGLRenderer({ canvas: canvas3d, antialias: true, preserveDrawingBuffer: true, stencil: true });
   _renderer3d.setPixelRatio(Math.min(devicePixelRatio, 2));
-  _renderer3d.setSize(W3, H3);
+  _renderer3d.setSize(cw, ch);
 
   _scene3d  = new THREE.Scene();
-  _camera3d = new THREE.PerspectiveCamera(48, W3 / H3, 0.01, 500);
+  _camera3d = new THREE.PerspectiveCamera(48, cw / ch, 0.01, 500);
   _camera3d.position.set(0, 0, 22);
 
-  // ライティング（ぬめっと光沢向け: フレネル・スペキュラーをシェーダー内計算）
-  // シェーダーが独自にライト計算するためThree.jsライトは最小限
   _scene3d.add(new THREE.AmbientLight(0x050508));
 
   _controls3d = new THREE.OrbitControls(_camera3d, canvas3d);
@@ -3538,7 +3657,7 @@ function _init3DRenderer() {
 
   window.addEventListener('resize', () => {
     if (!_3dOpen) return;
-    const w = overlay.clientWidth, h = overlay.clientHeight;
+    const { cw: w, ch: h } = _get3DCanvasSize();
     _camera3d.aspect = w / h;
     _camera3d.updateProjectionMatrix();
     _renderer3d.setSize(w, h);
@@ -3584,19 +3703,13 @@ let _bgPlane3d = null;
 
 function _updateBgPlane3D() {
   if (!_scene3d || !_camera3d) return;
-
-  // 既存のプレーンを削除
   if (_bgPlane3d) { _scene3d.remove(_bgPlane3d); _bgPlane3d = null; }
 
-  if (!bgImg.el) {
+  if (!bgImg.el && !bgVideo.el) {
     _scene3d.background = new THREE.Color(bgColor);
     return;
   }
 
-  // 背景色をシーンに設定
-  _scene3d.background = new THREE.Color(bgColor);
-
-  // 背景画像をCanvas2Dに合成してテクスチャ化
   const offscreen = document.createElement('canvas');
   const aspect = W / H;
   offscreen.width  = 1080;
@@ -3607,11 +3720,24 @@ function _updateBgPlane3D() {
   const sc = Math.min(offscreen.width / W, offscreen.height / H);
   const offX = (offscreen.width  - W * sc) / 2;
   const offY = (offscreen.height - H * sc) / 2;
-  oc.save();
-  oc.translate(offX + (bgImg.x + bgImg.w/2)*sc, offY + (bgImg.y + bgImg.h/2)*sc);
-  oc.rotate(bgImg.rot); oc.scale(bgImg.flipX, 1);
-  oc.drawImage(bgImg.el, -bgImg.w/2*sc, -bgImg.h/2*sc, bgImg.w*sc, bgImg.h*sc);
-  oc.restore();
+
+  // 静止画
+  if (bgImg.el) {
+    oc.save();
+    oc.translate(offX + (bgImg.x + bgImg.w/2)*sc, offY + (bgImg.y + bgImg.h/2)*sc);
+    oc.rotate(bgImg.rot); oc.scale(bgImg.flipX, 1);
+    oc.drawImage(bgImg.el, -bgImg.w/2*sc, -bgImg.h/2*sc, bgImg.w*sc, bgImg.h*sc);
+    oc.restore();
+  }
+
+  // 動画（readyState >= 2 でフレームあり）
+  if (bgVideo.el && bgVideo.el.readyState >= 2) {
+    oc.save();
+    oc.translate(offX + (bgVideo.x + bgVideo.w/2)*sc, offY + (bgVideo.y + bgVideo.h/2)*sc);
+    oc.rotate(bgVideo.rot); oc.scale(bgVideo.flipX, 1);
+    oc.drawImage(bgVideo.el, -bgVideo.w/2*sc, -bgVideo.h/2*sc, bgVideo.w*sc, bgVideo.h*sc);
+    oc.restore();
+  }
 
   const tex = new THREE.CanvasTexture(offscreen);
   _scene3d.background = tex;
@@ -3669,6 +3795,8 @@ function _animate3D() {
   });
 
   _renderer3d.clearStencil();
+  // 動画背景の場合は毎フレームテクスチャ更新
+  if (bgVideo.el && bgVideo.el.readyState >= 2) _updateBgPlane3D();
   _renderer3d.render(_scene3d, _camera3d);
 
   // MP4録画中はmergedCanvasは不要（WebGLキャンバスから直接キャプチャ）
@@ -3704,6 +3832,12 @@ async function enter3D() {
 
   if (!_renderer3d) _init3DRenderer();
 
+  // 2Dキャンバスのアスペクト比を毎回反映
+  const { cw, ch } = _get3DCanvasSize();
+  _renderer3d.setSize(cw, ch);
+  _camera3d.aspect = cw / ch;
+  _camera3d.updateProjectionMatrix();
+
   _buildTubes3D();
   _buildShineSeq();
   // モードボタンの初期表示を同期
@@ -3728,12 +3862,11 @@ function exit3D() {
 // ── 3D エクスポート ───────────────────────────────────────────────
 function _get3DExportSize() {
   const res = document.getElementById('sel-3d-res')?.value || 'screen';
-  const canvas = document.getElementById('canvas-3d');
-  // キャンバスのアスペクト比を維持
-  const aspect = canvas.width / canvas.height;
-  if (res === '4k')  return { w: Math.round(3840),              h: Math.round(3840 / aspect) };
-  if (res === 'hd')  return { w: Math.round(1920),              h: Math.round(1920 / aspect) };
-  return { w: canvas.width, h: canvas.height }; // screen
+  const aspect = W / H; // 2Dキャンバスと同じ比率
+  if (res === '4k') return { w: 3840, h: Math.round(3840 / aspect) };
+  if (res === 'hd') return { w: 1920, h: Math.round(1920 / aspect) };
+  const { cw, ch } = _get3DCanvasSize();
+  return { w: cw, h: ch };
 }
 
 function export3DStill(type) {
@@ -3785,15 +3918,10 @@ function toggle3DMP4() {
   }
 
   const fps    = parseInt(document.getElementById('sel-3d-fps')?.value || 60);
-  const { w, h } = _get3DExportSize();
   const canvas = document.getElementById('canvas-3d');
-  const origW  = canvas.width, origH = canvas.height;
 
-  // HD/4K解像度にリサイズしてからキャプチャ開始
-  _renderer3d.setSize(w, h);
-  _camera3d.aspect = w / h;
-  _camera3d.updateProjectionMatrix();
-
+  // リサイズしない（画面サイズのままキャプチャ）
+  // setSize変更でどアップになるバグを防ぐ
   _3dChunks = [];
   const mime = [
     'video/mp4;codecs="avc1.42E01E"',
@@ -3803,26 +3931,18 @@ function toggle3DMP4() {
   ].find(m => { try { return MediaRecorder.isTypeSupported(m); } catch(e){ return false; }})
   || 'video/webm';
 
-  // ビットレート: HD=20Mbps, 4K=60Mbps
-  const isHD   = (w >= 1920);
-  const is4K   = (w >= 3840);
-  const bps    = is4K ? 60_000_000 : isHD ? 20_000_000 : 8_000_000;
+  const bps = 20_000_000; // 20Mbps固定（高品質）
 
   const stream = canvas.captureStream(fps);
   _3dRecorder  = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: bps });
   _3dRecorder.ondataavailable = e => { if(e.data.size) _3dChunks.push(e.data); };
   _3dRecorder.onstop = () => {
-    _renderer3d.setSize(origW, origH);
-    _camera3d.aspect = origW / origH;
-    _camera3d.updateProjectionMatrix();
-
-    const ext  = mime.includes('mp4') ? 'mp4' : 'webm';
-    const res  = is4K ? '_4K' : isHD ? '_HD' : '';
-    const ts   = new Date().toISOString().slice(0,19).replace(/[:T]/g,'-');
+    const ext = mime.includes('mp4') ? 'mp4' : 'webm';
+    const ts  = new Date().toISOString().slice(0,19).replace(/[:T]/g,'-');
     const blob = new Blob(_3dChunks, { type: mime });
     const url  = URL.createObjectURL(blob);
     const a    = document.createElement('a');
-    a.download = 'NEONS_3D' + res + '_' + ts + '.' + ext;
+    a.download = 'NEONS_3D_' + ts + '.' + ext;
     a.href = url; a.click();
     URL.revokeObjectURL(url);
     if (btn) { btn.textContent = '↓ MP4'; btn.classList.remove('on'); }

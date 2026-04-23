@@ -587,7 +587,7 @@ select option { background: #111; }
   <div id="sel-delete" style="display:none;position:fixed;bottom:28px;left:50%;transform:translateX(-50%);
     background:rgba(0,0,0,0.75);border:0.5px solid rgba(255,80,80,0.5);border-radius:3px;
     padding:7px 20px;font-family:'Space Mono',monospace;font-size:9px;letter-spacing:0.15em;
-    color:rgba(255,80,80,0.8);cursor:pointer;pointer-events:auto;white-space:nowrap">DELETE</div>
+    color:rgba(255,80,80,0.8);cursor:pointer;white-space:nowrap;z-index:26;pointer-events:auto">DELETE</div>
   <div id="sel-rubber" style="position:absolute;border:1px dashed rgba(255,255,255,0.5);background:rgba(255,255,255,0.04);box-sizing:border-box;display:none;pointer-events:none"></div>
 </div>
 
@@ -2499,12 +2499,13 @@ function updateSelBox() {
   if (!selectedIds.length) { box.style.display='none'; return; }
   const b = getSelectionBounds();
   if (!b) return;
-  const areaRect = area.getBoundingClientRect();
-  const cs = parseFloat(CV.style.width)/W || 1;
-  box.style.left   = (areaRect.left + b.minX*cs) + 'px';
-  box.style.top    = (areaRect.top  + b.minY*cs) + 'px';
-  box.style.width  = ((b.maxX-b.minX)*cs) + 'px';
-  box.style.height = ((b.maxY-b.minY)*cs) + 'px';
+  // CV.getBoundingClientRect() はCSS transform（zoom・pan）適用後の実座標を返す
+  const cvRect = CV.getBoundingClientRect();
+  const pxPerUnit = cvRect.width / W; // scale * zoom
+  box.style.left   = (cvRect.left + b.minX * pxPerUnit) + 'px';
+  box.style.top    = (cvRect.top  + b.minY * pxPerUnit) + 'px';
+  box.style.width  = ((b.maxX - b.minX) * pxPerUnit) + 'px';
+  box.style.height = ((b.maxY - b.minY) * pxPerUnit) + 'px';
   box.style.display = 'block';
   document.getElementById('sel-delete').style.display = 'block';
 }
@@ -2528,9 +2529,10 @@ function drawSelectionHighlight() {
 let _selState = null;
 
 function _selCanvasXY(clientX, clientY) {
-  const rect = area.getBoundingClientRect();
-  const cs = parseFloat(CV.style.width)/W || 1;
-  return { x:(clientX-rect.left)/cs, y:(clientY-rect.top)/cs };
+  const cvRect = CV.getBoundingClientRect();
+  const pxPerUnit = cvRect.width / W;
+  return { x: (clientX - cvRect.left) / pxPerUnit,
+           y: (clientY - cvRect.top)  / pxPerUnit };
 }
 
 function _selPointerDown(clientX, clientY) {
@@ -2565,10 +2567,10 @@ function _selPointerMove(clientX, clientY) {
     redrawAll(glowApplied); drawSelectionHighlight(); updateSelBox();
   } else if (_selState.mode==='rubber') {
     const { x:sx, y:sy } = _selState.startScreen;
-    const areaRect=area.getBoundingClientRect();
+    const cvRect=CV.getBoundingClientRect();
     const rubber=document.getElementById('sel-rubber');
-    rubber.style.left   = (Math.min(sx,clientX)-areaRect.left)+'px';
-    rubber.style.top    = (Math.min(sy,clientY)-areaRect.top)+'px';
+    rubber.style.left   = (Math.min(sx,clientX)-cvRect.left)+'px';
+    rubber.style.top    = (Math.min(sy,clientY)-cvRect.top)+'px';
     rubber.style.width  = Math.abs(clientX-sx)+'px';
     rubber.style.height = Math.abs(clientY-sy)+'px';
     rubber.style.display = (Math.abs(clientX-sx)>4||Math.abs(clientY-sy)>4)?'block':'none';
@@ -2587,14 +2589,14 @@ function _selPointerUp(clientX, clientY) {
     if (Math.abs(clientX-sx)<4 && Math.abs(clientY-sy)<4) {
       clearSelection();
     } else {
-      const areaRect=area.getBoundingClientRect();
-      const cs=parseFloat(CV.style.width)/W||1;
+      const cvRect2=CV.getBoundingClientRect();
+      const ppu=cvRect2.width/W;
       const rMinX=Math.min(sx,clientX), rMaxX=Math.max(sx,clientX);
       const rMinY=Math.min(sy,clientY), rMaxY=Math.max(sy,clientY);
       selectedIds=drawLog.filter(e=>{
         const s=colorStrokes[e.color]?.[e.idx]; if(!s) return false;
         return s.points.some(p=>{
-          const px=areaRect.left+p.x*cs, py=areaRect.top+p.y*cs;
+          const px=cvRect2.left+p.x*ppu, py=cvRect2.top+p.y*ppu;
           return px>=rMinX&&px<=rMaxX&&py>=rMinY&&py<=rMaxY;
         });
       }).map(e=>e.id);

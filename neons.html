@@ -365,7 +365,7 @@ input[type=range]::-webkit-slider-thumb {
 
 /* モーションコントロール */
 #motion-ctrl {
-  position: absolute; bottom: 18px; right: 16px; z-index: 10;
+  position: absolute; bottom: 60px; right: 16px; z-index: 10;
   display: flex; flex-direction: column; align-items: flex-end; gap: 7px;
 }
 #motion-mode { display: flex; gap: 5px; }
@@ -4222,8 +4222,8 @@ function _animate3D() {
     mat.uniforms.uWaveAmp.value  = cw + (waveTarget  - cw) * 0.04;
   });
 
-  // 動画背景の場合は毎フレームテクスチャ更新（TAILモード中はスキップ）
-  if (!_tailOn && bgVideo.el && bgVideo.el.readyState >= 2) _updateBgPlane3D();
+  // 動画背景の場合は毎フレームテクスチャ更新（TAILモード中はスキップしない）
+  if (bgVideo.el && bgVideo.el.readyState >= 2) _updateBgPlane3D();
 
   if (_tailOn && _3dMotionMode !== 0 && _trailRT) {
     const savedBg = _scene3d.background;
@@ -4477,6 +4477,8 @@ function setTailMode(mode) {
     } else {
       _renderer3d.autoClear = true; _renderer3d.setRenderTarget(null);
     }
+    // 背景を再適用（tailモード切替で消えるのを防ぐ）
+    _updateBgPlane3D();
   }
 }
 

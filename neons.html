@@ -1329,7 +1329,7 @@ function makeDot(color, isUsed) {
     d.addEventListener('drop',      onColorDrop);
     d.addEventListener('dragend',   onColorDragEnd);
     // タッチ対応
-    d.addEventListener('touchstart', onColorTouchStart, { passive: false });
+    d.addEventListener('touchstart', onColorTouchStart);
   }
   return d;
 }
@@ -1358,43 +1358,59 @@ function onColorDragEnd() {
   _dragEl = null; _dragColor = null;
 }
 
-// タッチドラッグ
+// タッチドラッグ（長押し300msでドラッグ開始）
 let _touchDragColor = null, _touchGhost = null;
 function onColorTouchStart(e) {
   if (e.touches.length !== 1) return;
-  e.preventDefault();
   const el = e.currentTarget;
-  _touchDragColor = el.dataset.color;
-  // ゴースト作成
-  _touchGhost = el.cloneNode(true);
-  _touchGhost.style.cssText = 'position:fixed;opacity:0.7;pointer-events:none;z-index:9999;transform:scale(1.1)';
-  document.body.appendChild(_touchGhost);
-  const t = e.touches[0];
-  _touchGhost.style.left = (t.clientX - 12) + 'px';
-  _touchGhost.style.top  = (t.clientY - 12) + 'px';
-  el.style.opacity = '0.4';
+  const t0 = e.touches[0];
+  let moved = false;
+  let longPressTimer = null;
 
   const onMove = ev => {
-    ev.preventDefault();
     const tc = ev.touches[0];
-    _touchGhost.style.left = (tc.clientX - 12) + 'px';
-    _touchGhost.style.top  = (tc.clientY - 12) + 'px';
+    if (Math.abs(tc.clientX - t0.clientX) > 8 || Math.abs(tc.clientY - t0.clientY) > 8) {
+      moved = true;
+      clearTimeout(longPressTimer);
+    }
+    if (_touchGhost) {
+      ev.preventDefault();
+      _touchGhost.style.left = (tc.clientX - 12) + 'px';
+      _touchGhost.style.top  = (tc.clientY - 12) + 'px';
+    }
   };
+
   const onEnd = ev => {
-    el.style.opacity = '';
-    if (_touchGhost) { _touchGhost.remove(); _touchGhost = null; }
+    clearTimeout(longPressTimer);
     document.removeEventListener('touchmove', onMove);
     document.removeEventListener('touchend', onEnd);
-    // ドロップ先を検出
-    const tc = ev.changedTouches[0];
-    const target = document.elementFromPoint(tc.clientX, tc.clientY)?.closest('.cdot-btn');
-    if (target && target.dataset.color && target.dataset.color !== _touchDragColor) {
-      _reorderColor(_touchDragColor, target.dataset.color);
+    el.style.opacity = '';
+    if (_touchGhost) { _touchGhost.remove(); _touchGhost = null; }
+    if (_touchDragColor) {
+      const tc = ev.changedTouches[0];
+      const target = document.elementFromPoint(tc.clientX, tc.clientY)?.closest('.cdot-btn');
+      if (target && target.dataset.color && target.dataset.color !== _touchDragColor) {
+        _reorderColor(_touchDragColor, target.dataset.color);
+      }
+      _touchDragColor = null;
     }
-    _touchDragColor = null;
   };
+
   document.addEventListener('touchmove', onMove, { passive: false });
   document.addEventListener('touchend', onEnd);
+
+  // 300ms長押しでドラッグ開始
+  longPressTimer = setTimeout(() => {
+    if (moved) return;
+    e.preventDefault();
+    _touchDragColor = el.dataset.color;
+    _touchGhost = el.cloneNode(true);
+    _touchGhost.style.cssText = 'position:fixed;opacity:0.7;pointer-events:none;z-index:9999;transform:scale(1.1)';
+    document.body.appendChild(_touchGhost);
+    _touchGhost.style.left = (t0.clientX - 12) + 'px';
+    _touchGhost.style.top  = (t0.clientY - 12) + 'px';
+    el.style.opacity = '0.4';
+  }, 300);
 }
 
 function _reorderColor(fromColor, toColor) {

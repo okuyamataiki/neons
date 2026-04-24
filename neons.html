@@ -503,6 +503,21 @@ select option { background: #111; }
   flex-shrink: 0; transition: border-color 0.12s;
 }
 .bg-dot.active { border-color: rgba(255,255,255,0.7); }
+
+.layer-item {
+  display: flex; align-items: center; gap: 5px;
+  padding: 3px 2px; border-radius: 2px;
+  cursor: default; user-select: none;
+}
+.layer-dot {
+  width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0;
+}
+.layer-arrow {
+  background: none; border: none; color: rgba(255,255,255,0.3);
+  font-size: 9px; cursor: pointer; padding: 0 1px; line-height: 1;
+  transition: color 0.1s;
+}
+.layer-arrow:hover { color: rgba(255,255,255,0.8); }
 </style>
 </head>
 <body>
@@ -594,6 +609,16 @@ select option { background: #111; }
   background:rgba(0,0,0,0.75);border:0.5px solid rgba(255,80,80,0.5);border-radius:3px;
   padding:7px 20px;font-family:'Space Mono',monospace;font-size:9px;letter-spacing:0.15em;
   color:rgba(255,80,80,0.8);cursor:pointer;white-space:nowrap;z-index:30;touch-action:manipulation">DELETE</div>
+
+<div id="sel-copy" style="display:none;position:fixed;bottom:28px;left:calc(50% + 90px);transform:translateX(-50%);
+  background:rgba(0,0,0,0.75);border:0.5px solid rgba(255,255,255,0.3);border-radius:3px;
+  padding:7px 20px;font-family:'Space Mono',monospace;font-size:9px;letter-spacing:0.15em;
+  color:rgba(255,255,255,0.75);cursor:pointer;white-space:nowrap;z-index:30;touch-action:manipulation">COPY</div>
+
+<div id="sel-paste-hint" style="display:none;position:fixed;bottom:28px;left:calc(50% - 90px);transform:translateX(-50%);
+  background:rgba(0,0,0,0.75);border:0.5px solid rgba(255,255,255,0.3);border-radius:3px;
+  padding:7px 20px;font-family:'Space Mono',monospace;font-size:9px;letter-spacing:0.15em;
+  color:rgba(255,255,255,0.75);cursor:pointer;white-space:nowrap;z-index:30;touch-action:manipulation">PASTE</div>
 
 <!-- BG IMAGE TRANSFORM OVERLAY -->
 <div id="bg-img-overlay" style="display:none;position:fixed;inset:0;z-index:25;touch-action:none">
@@ -1236,7 +1261,6 @@ function makeDot(color, isUsed) {
   d.dataset.color = color;
   d.onclick = () => {
     setColor(d);
-    // ピッカーを選択色に同期
     const picker = document.getElementById('color-edit-picker');
     const preview = document.getElementById('color-edit-preview');
     if (picker) picker.value = color;
@@ -1248,8 +1272,104 @@ function makeDot(color, isUsed) {
   dot.className = 'cdot-dot';
   dot.style.background = color;
   d.appendChild(dot);
+
+  // 使用済み色のみドラッグハンドル追加
+  if (isUsed) {
+    d.draggable = true;
+    d.style.cursor = 'grab';
+    d.addEventListener('dragstart', onColorDragStart);
+    d.addEventListener('dragover',  onColorDragOver);
+    d.addEventListener('drop',      onColorDrop);
+    d.addEventListener('dragend',   onColorDragEnd);
+    // タッチ対応
+    d.addEventListener('touchstart', onColorTouchStart, { passive: false });
+  }
   return d;
 }
+
+// ── カラードラッグ並び替え ────────────────────────────────────
+let _dragColor = null, _dragEl = null;
+
+function onColorDragStart(e) {
+  _dragColor = e.currentTarget.dataset.color;
+  _dragEl = e.currentTarget;
+  e.dataTransfer.effectAllowed = 'move';
+  setTimeout(() => { if (_dragEl) _dragEl.style.opacity = '0.4'; }, 0);
+}
+function onColorDragOver(e) {
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+}
+function onColorDrop(e) {
+  e.preventDefault();
+  const targetColor = e.currentTarget.dataset.color;
+  if (!_dragColor || _dragColor === targetColor) return;
+  _reorderColor(_dragColor, targetColor);
+}
+function onColorDragEnd() {
+  if (_dragEl) _dragEl.style.opacity = '';
+  _dragEl = null; _dragColor = null;
+}
+
+// タッチドラッグ
+let _touchDragColor = null, _touchGhost = null;
+function onColorTouchStart(e) {
+  if (e.touches.length !== 1) return;
+  e.preventDefault();
+  const el = e.currentTarget;
+  _touchDragColor = el.dataset.color;
+  // ゴースト作成
+  _touchGhost = el.cloneNode(true);
+  _touchGhost.style.cssText = 'position:fixed;opacity:0.7;pointer-events:none;z-index:9999;transform:scale(1.1)';
+  document.body.appendChild(_touchGhost);
+  const t = e.touches[0];
+  _touchGhost.style.left = (t.clientX - 12) + 'px';
+  _touchGhost.style.top  = (t.clientY - 12) + 'px';
+  el.style.opacity = '0.4';
+
+  const onMove = ev => {
+    ev.preventDefault();
+    const tc = ev.touches[0];
+    _touchGhost.style.left = (tc.clientX - 12) + 'px';
+    _touchGhost.style.top  = (tc.clientY - 12) + 'px';
+  };
+  const onEnd = ev => {
+    el.style.opacity = '';
+    if (_touchGhost) { _touchGhost.remove(); _touchGhost = null; }
+    document.removeEventListener('touchmove', onMove);
+    document.removeEventListener('touchend', onEnd);
+    // ドロップ先を検出
+    const tc = ev.changedTouches[0];
+    const target = document.elementFromPoint(tc.clientX, tc.clientY)?.closest('.cdot-btn');
+    if (target && target.dataset.color && target.dataset.color !== _touchDragColor) {
+      _reorderColor(_touchDragColor, target.dataset.color);
+    }
+    _touchDragColor = null;
+  };
+  document.addEventListener('touchmove', onMove, { passive: false });
+  document.addEventListener('touchend', onEnd);
+}
+
+function _reorderColor(fromColor, toColor) {
+  // ALL_COLORSの順番を入れ替え
+  const fi = ALL_COLORS.indexOf(fromColor);
+  const ti = ALL_COLORS.indexOf(toColor);
+  if (fi < 0 || ti < 0) return;
+  ALL_COLORS.splice(fi, 1);
+  ALL_COLORS.splice(ti, 0, fromColor);
+  // layerOrderも同様に
+  const li = layerOrder.indexOf(fromColor);
+  const lt = layerOrder.indexOf(toColor);
+  if (li >= 0 && lt >= 0) {
+    layerOrder.splice(li, 1);
+    layerOrder.splice(lt, 0, fromColor);
+  }
+  updateColorPalette();
+  if (shining) { stopShine(); startShine(); }
+  if (_3dOpen) _buildShineSeq();
+  saveToLocal();
+}
+// ── カラードラッグ END ────────────────────────────────────────
 
 function replaceColorPreview(oldColor, newColor) {
   // DOM操作なし・履歴なし。キャンバスだけ更新してプレビュー
@@ -1333,6 +1453,7 @@ function updateColorPalette() {
   unusedColors.forEach(c => unusedEl.appendChild(makeDot(c, false)));
 
   divEl.style.display = (usedColors.length > 0 && unusedColors.length > 0) ? 'block' : 'none';
+  syncLayerOrder();
 }
 
 // ── SVG IMPORT ──────────────────────────────────────────────
@@ -2155,11 +2276,58 @@ function calcMul(inCur, inNext, phase, step) {
   return dim;
 }
 
+// ── レイヤー順管理 ───────────────────────────────────────────
+let layerOrder = []; // 使用済み色の明滅順（上=先）
+
 function getUsedColors() {
-  const seen = new Set(), result = [];
-  drawLog.forEach(e => { if (!seen.has(e.color)) { seen.add(e.color); result.push(e.color); } });
-  return result;
+  // layerOrderに存在する色のうち、実際にストロークがある色のみ返す
+  const active = new Set(drawLog.map(e => e.color));
+  return layerOrder.filter(c => active.has(c));
 }
+
+function syncLayerOrder() {
+  // drawLogの色をlayerOrderに同期（新色を末尾追加、消えた色を除去）
+  const active = [...new Set(drawLog.map(e => e.color))];
+  // 新色を末尾に追加
+  active.forEach(c => { if (!layerOrder.includes(c)) layerOrder.push(c); });
+  // 消えた色を除去
+  layerOrder = layerOrder.filter(c => active.includes(c));
+  renderLayerList();
+}
+
+function renderLayerList() {
+  const list = document.getElementById('layer-list');
+  if (!list) return;
+  const colors = getUsedColors();
+  if (!colors.length) { list.innerHTML = '<div style="font-size:7px;color:rgba(255,255,255,0.2);text-align:center;padding:4px 0">—</div>'; return; }
+  list.innerHTML = '';
+  colors.forEach((col, i) => {
+    const row = document.createElement('div');
+    row.className = 'layer-item';
+    row.innerHTML = `
+      <div class="layer-dot" style="background:${col};box-shadow:0 0 4px ${col}80"></div>
+      <div style="flex:1;font-size:7px;letter-spacing:0.06em;color:rgba(255,255,255,0.45);overflow:hidden;text-overflow:ellipsis">${col}</div>
+      <button class="layer-arrow" title="上へ" onclick="moveLayer(${i},-1)" ${i===0?'style="opacity:0.2;pointer-events:none"':''}>▲</button>
+      <button class="layer-arrow" title="下へ" onclick="moveLayer(${i},+1)" ${i===colors.length-1?'style="opacity:0.2;pointer-events:none"':''}>▼</button>
+    `;
+    list.appendChild(row);
+  });
+}
+
+function moveLayer(idx, dir) {
+  const colors = getUsedColors();
+  const newIdx = idx + dir;
+  if (newIdx < 0 || newIdx >= colors.length) return;
+  // layerOrder内での実際のインデックスを操作
+  const ai = layerOrder.indexOf(colors[idx]);
+  const bi = layerOrder.indexOf(colors[newIdx]);
+  [layerOrder[ai], layerOrder[bi]] = [layerOrder[bi], layerOrder[ai]];
+  renderLayerList();
+  // SHINEが動いていたら再構築
+  if (shining) { stopShine(); startShine(); }
+  if (_3dOpen)  { _buildShineSeq(); }
+}
+// ── レイヤー END ──────────────────────────────────────────────
 
 function startShine() {
   const allColors = getUsedColors();
@@ -2461,6 +2629,7 @@ function saveToLocal() {
       drawLog: drawLog.map(e => ({...e})),
       strokeId,
       allColors: ALL_COLORS.slice(),
+      layerOrder: layerOrder.slice(),
       bgImg: bgImg.base64 ? {
         base64: bgImg.base64,
         x: bgImg.x, y: bgImg.y, w: bgImg.w, h: bgImg.h,
@@ -2511,6 +2680,7 @@ function loadFromLocal() {
     });
     drawLog = data.drawLog || [];
     strokeId = data.strokeId || 0;
+    layerOrder = data.layerOrder || [];
 
     // 背景画像を復元
     if (data.bgImg && data.bgImg.base64) {
@@ -2562,6 +2732,8 @@ function clearSelection() {
   selectedIds = [];
   document.getElementById('sel-box').style.display = 'none';
   document.getElementById('sel-delete').style.display = 'none';
+  document.getElementById('sel-copy').style.display = 'none';
+  document.getElementById('sel-paste-hint').style.display = 'none';
   redrawAll(glowApplied);
 }
 
@@ -2626,6 +2798,7 @@ function updateSelBox() {
   box.style.height = ((b.maxY - b.minY) * pxPerUnit) + 'px';
   box.style.display = 'block';
   document.getElementById('sel-delete').style.display = 'block';
+  document.getElementById('sel-copy').style.display = 'block';
 }
 
 function drawSelectionHighlight() {
@@ -2787,14 +2960,85 @@ function deleteSelected() {
   clearSelection(); updateColorPalette(); saveToLocal();
 }
 
+// ── 選択ツール ピンチスケール ──────────────────────────────────
+function _selPinchStart(e) {
+  const b = getSelectionBounds();
+  if (!b) return;
+  const t0 = e.touches[0], t1 = e.touches[1];
+  const dist = Math.hypot(t1.clientX-t0.clientX, t1.clientY-t0.clientY);
+  _selState = {
+    mode: 'pinch',
+    startDist: dist,
+    cx: (b.minX+b.maxX)/2,
+    cy: (b.minY+b.maxY)/2,
+    startPoints: selectedIds.map(id=>{
+      const r=getStrokeById(id);
+      return { id, pts: r.stroke.points.map(p=>({...p})) };
+    })
+  };
+}
+
+function _selPinchMove(e) {
+  if(!_selState || _selState.mode!=='pinch') return;
+  const t0=e.touches[0], t1=e.touches[1];
+  const dist = Math.hypot(t1.clientX-t0.clientX, t1.clientY-t0.clientY);
+  const sc = dist / _selState.startDist;
+  const {cx, cy, startPoints} = _selState;
+  startPoints.forEach(({id, pts})=>{
+    const r=getStrokeById(id); if(!r?.stroke) return;
+    r.stroke.points = pts.map(p=>({
+      x: cx + (p.x-cx)*sc,
+      y: cy + (p.y-cy)*sc
+    }));
+  });
+  Object.keys(colorStrokes).forEach(k=>delete colorCache[k]);
+  redrawAll(glowApplied);
+  drawSelectionHighlight();
+  updateSelBox();
+}
+
+function _selPinchEnd() {
+  if(!_selState || _selState.mode!=='pinch') return;
+  saveHist();
+  Object.keys(colorStrokes).forEach(k=>delete colorCache[k]);
+  saveToLocal();
+  updateSelBox();
+  _selState = null;
+}
+// ── ピンチスケール END ────────────────────────────────────────
+
 window.addEventListener('DOMContentLoaded', ()=>{
   const ov=document.getElementById('sel-overlay');
   ov.addEventListener('mousedown',  e=>{ if(!selectMode) return; e.preventDefault(); _selPointerDown(e.clientX,e.clientY); });
   document.addEventListener('mousemove', e=>{ if(!selectMode||!_selState) return; _selPointerMove(e.clientX,e.clientY); });
   document.addEventListener('mouseup',   e=>{ if(!selectMode||!_selState) return; _selPointerUp(e.clientX,e.clientY); });
-  ov.addEventListener('touchstart', e=>{ if(!selectMode) return; e.preventDefault(); const t=e.touches[0]; _selPointerDown(t.clientX,t.clientY); },{passive:false});
-  ov.addEventListener('touchmove',  e=>{ if(!selectMode||!_selState) return; e.preventDefault(); const t=e.touches[0]; _selPointerMove(t.clientX,t.clientY); },{passive:false});
-  ov.addEventListener('touchend',   e=>{ if(!selectMode||!_selState) return; const t=e.changedTouches[0]; _selPointerUp(t.clientX,t.clientY); });
+  ov.addEventListener('touchstart', e=>{ 
+    if(!selectMode) return; 
+    e.preventDefault(); 
+    if(e.touches.length===2 && selectedIds.length) {
+      // 2本指ピンチ開始
+      _selPinchStart(e);
+    } else {
+      const t=e.touches[0]; _selPointerDown(t.clientX,t.clientY); 
+    }
+  },{passive:false});
+  ov.addEventListener('touchmove', e=>{ 
+    if(!selectMode) return; 
+    e.preventDefault(); 
+    if(e.touches.length===2 && _selState?.mode==='pinch') {
+      _selPinchMove(e);
+    } else if(_selState) {
+      const t=e.touches[0]; _selPointerMove(t.clientX,t.clientY); 
+    }
+  },{passive:false});
+  ov.addEventListener('touchend', e=>{ 
+    if(!selectMode) return; 
+    if(_selState?.mode==='pinch') {
+      _selPinchEnd();
+    } else if(_selState) {
+      const t=e.changedTouches[0]; _selPointerUp(t.clientX,t.clientY); 
+    }
+  });
   ['sel-tl','sel-tr','sel-bl','sel-br'].forEach(id=>{
     const el=document.getElementById(id);
     el.addEventListener('mousedown',  e=>{ e.stopPropagation();e.preventDefault();_selScaleStart(id,e.clientX,e.clientY); });
@@ -2806,11 +3050,73 @@ window.addEventListener('DOMContentLoaded', ()=>{
   const delBtn = document.getElementById('sel-delete');
   delBtn.addEventListener('click',      deleteSelected);
   delBtn.addEventListener('touchstart', e => { e.preventDefault(); e.stopPropagation(); deleteSelected(); }, { passive: false });
+  const copyBtn = document.getElementById('sel-copy');
+  copyBtn.addEventListener('click',      copySelected);
+  copyBtn.addEventListener('touchstart', e => { e.preventDefault(); e.stopPropagation(); copySelected(); }, { passive: false });
+
+  const pasteBtn = document.getElementById('sel-paste-hint');
+  pasteBtn.addEventListener('click',      pasteAtVisibleCenter);
+  pasteBtn.addEventListener('touchstart', e => { e.preventDefault(); e.stopPropagation(); pasteAtVisibleCenter(); }, { passive: false });
 });
 document.addEventListener('keydown', e=>{
   if(selectMode&&(e.key==='Delete'||e.key==='Backspace')&&selectedIds.length){ e.preventDefault(); deleteSelected(); }
+  if(selectMode&&(e.metaKey||e.ctrlKey)&&e.key==='c'&&selectedIds.length){ e.preventDefault(); copySelected(); }
+  if(selectMode&&(e.metaKey||e.ctrlKey)&&e.key==='v'&&_clipboard){ e.preventDefault(); pasteAtVisibleCenter(); }
 });
-// ── 選択ツール END ─────────────────────────────────────────────
+// ── コピー・ペースト ──────────────────────────────────────────
+let _clipboard = null; // { strokes:[{color,size,points:[]}], cx, cy }
+
+function copySelected() {
+  if (!selectedIds.length) return;
+  const strokes = selectedIds.map(id => {
+    const r = getStrokeById(id);
+    if (!r?.stroke) return null;
+    return { color: r.entry.color, size: r.stroke.size, points: r.stroke.points.map(p => ({...p})) };
+  }).filter(Boolean);
+  if (!strokes.length) return;
+
+  const b = getSelectionBounds();
+  _clipboard = { strokes, cx: (b.minX + b.maxX) / 2, cy: (b.minY + b.maxY) / 2 };
+
+  // PASTEボタンを表示
+  document.getElementById('sel-paste-hint').style.display = 'block';
+}
+
+function pasteAtVisibleCenter() {
+  if (!_clipboard) return;
+
+  // 表示中の画面中央をキャンバス座標に変換（zoom/pan考慮）
+  const cvRect = CV.getBoundingClientRect();
+  const pxPerUnit = cvRect.width / W;
+  // 画面中央のキャンバス座標
+  const cx = (window.innerWidth / 2 - cvRect.left) / pxPerUnit;
+  const cy = (window.innerHeight / 2 - cvRect.top)  / pxPerUnit;
+
+  const dx = cx - _clipboard.cx;
+  const dy = cy - _clipboard.cy;
+  saveHist();
+
+  const newIds = [];
+  _clipboard.strokes.forEach(s => {
+    if (!ALL_COLORS.includes(s.color)) { ALL_COLORS.push(s.color); colorStrokes[s.color] = []; }
+    if (!colorStrokes[s.color]) colorStrokes[s.color] = [];
+    const idx = colorStrokes[s.color].length;
+    const newPoints = s.points.map(p => ({ x: p.x + dx, y: p.y + dy }));
+    colorStrokes[s.color].push({ points: newPoints, size: s.size });
+    const id = strokeId++;
+    drawLog.push({ id, color: s.color, idx });
+    newIds.push(id);
+  });
+
+  Object.keys(colorStrokes).forEach(k => delete colorCache[k]);
+  updateColorPalette();
+  redrawAll(glowApplied);
+  selectedIds = newIds;
+  drawSelectionHighlight();
+  updateSelBox();
+  saveToLocal();
+}
+// ── コピー・ペースト END ──────────────────────────────────────
 
 let spaceDown = false;
 let pickerOpen = false;

@@ -990,15 +990,19 @@ function loadBgVideo(input) {
   vid.loop = true;
   vid.playsInline = true;
   vid.setAttribute('playsinline', '');
-  // オフスクリーン配置（適切なサイズでフレームデコードを有効化）
-  vid.style.position = 'fixed';
-  vid.style.left = '-9999px';
-  vid.style.top = '0';
-  vid.style.width = '640px';
-  vid.style.height = '360px';
+  vid.setAttribute('webkit-playsinline', '');
+  vid.style.cssText = 'position:fixed;left:-9999px;top:0;width:640px;height:360px;pointer-events:none';
   document.body.appendChild(vid);
 
-  vid.addEventListener('loadedmetadata', () => {
+  // iOSはユーザージェスチャー直後にplay()を呼ばないと再生できない
+  vid.src = URL.createObjectURL(file);
+  vid.play().catch(() => {});
+
+  let started = false;
+  const setup = () => {
+    if (started) return;
+    if (!vid.videoWidth || !vid.videoHeight) return;
+    started = true;
     const sc = Math.min(W / vid.videoWidth, H / vid.videoHeight);
     bgVideo.w = vid.videoWidth  * sc;
     bgVideo.h = vid.videoHeight * sc;
@@ -1006,17 +1010,17 @@ function loadBgVideo(input) {
     bgVideo.y = (H - bgVideo.h) / 2;
     bgVideo.rot = 0;
     bgVideo.flipX = 1;
-  });
-
-  vid.addEventListener('canplay', () => {
-    vid.play().catch(() => {});
     bgImg = { el: null, x: 0, y: 0, w: 0, h: 0, rot: 0, flipX: 1, base64: null };
     bgVideo.el = vid;
     startBgVideoLoop();
     openBgTransform();
-  }, { once: true });
+  };
 
-  vid.src = URL.createObjectURL(file);
+  vid.addEventListener('loadedmetadata', setup);
+  vid.addEventListener('canplay',        setup);
+  vid.addEventListener('playing',        setup);
+  setTimeout(() => { if (!started) setup(); }, 1500);
+
   input.value = '';
 }
 

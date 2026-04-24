@@ -397,6 +397,21 @@ input[type=range]::-webkit-slider-thumb {
   -webkit-appearance: none; width: 12px; height: 12px;
   border-radius: 50%; background: rgba(255,255,255,0.65); cursor: pointer;
 }
+#motion-tail {
+  display: flex; align-items: center; gap: 6px;
+  background: rgba(0,0,0,0.65);
+  border: 0.5px solid rgba(255,255,255,0.14); border-radius: 2px;
+  padding: 5px 9px;
+}
+#tail-lum, #tail-len, #tail-lum-b, #tail-len-b {
+  -webkit-appearance: none; width: 62px; height: 2px;
+  background: rgba(255,255,255,0.18); outline: none; cursor: pointer;
+}
+#tail-lum::-webkit-slider-thumb, #tail-len::-webkit-slider-thumb,
+#tail-lum-b::-webkit-slider-thumb, #tail-len-b::-webkit-slider-thumb {
+  -webkit-appearance: none; width: 12px; height: 12px;
+  border-radius: 50%; background: rgba(255,255,255,0.65); cursor: pointer;
+}
 
 /* 3D エクスポートボタン群 */
 #export-3d {
@@ -908,10 +923,42 @@ select option { background: #111; }
     <div id="motion-speed">
       <span class="mot-lbl">SPD</span>
       <input type="range" id="motion-spd-slider" min="1" max="100" value="40"
-        oninput="_3dSpeedMul = +this.value / 40">
+        oninput="_3dSpeedMul = +this.value / 20">
     </div>
     <div id="motion-wave">
       <button class="mot-btn" id="btn-wave" onclick="toggleWave()">WAVE</button>
+    </div>
+    <div id="motion-tail">
+      <div style="display:flex;gap:4px">
+        <button class="mot-btn" id="btn-tail-a" onclick="setTailMode('A')">TAIL A</button>
+        <button class="mot-btn" id="btn-tail-b" onclick="setTailMode('B')">TAIL B</button>
+      </div>
+      <!-- TAIL A sliders -->
+      <div id="tail-sliders-a" style="display:none;flex-direction:column;gap:4px;margin-top:4px">
+        <div style="display:flex;align-items:center;gap:5px">
+          <span style="font-size:7px;letter-spacing:0.08em;color:rgba(255,255,255,0.3);width:14px">LUM</span>
+          <input type="range" id="tail-lum" min="1" max="99" value="50"
+            oninput="_tailLum = +this.value / 100" style="width:62px">
+        </div>
+        <div style="display:flex;align-items:center;gap:5px">
+          <span style="font-size:7px;letter-spacing:0.08em;color:rgba(255,255,255,0.3);width:14px">LEN</span>
+          <input type="range" id="tail-len" min="1" max="99" value="50"
+            oninput="_tailLen = +this.value / 100" style="width:62px">
+        </div>
+      </div>
+      <!-- TAIL B sliders -->
+      <div id="tail-sliders-b" style="display:none;flex-direction:column;gap:4px;margin-top:4px">
+        <div style="display:flex;align-items:center;gap:5px">
+          <span style="font-size:7px;letter-spacing:0.08em;color:rgba(255,255,255,0.3);width:14px">GLW</span>
+          <input type="range" id="tail-lum-b" min="1" max="99" value="50"
+            oninput="_tailLumB = +this.value / 100" style="width:62px">
+        </div>
+        <div style="display:flex;align-items:center;gap:5px">
+          <span style="font-size:7px;letter-spacing:0.08em;color:rgba(255,255,255,0.3);width:14px">LEN</span>
+          <input type="range" id="tail-len-b" min="1" max="99" value="60"
+            oninput="_tailLenB = +this.value / 100" style="width:62px">
+        </div>
+      </div>
     </div>
   </div>
   <div id="hint-3d">drag — orbit &nbsp;·&nbsp; scroll — zoom &nbsp;·&nbsp; Esc — exit</div>
@@ -3274,6 +3321,14 @@ let _renderer3d, _scene3d, _camera3d, _controls3d;
 let _tubeGroup3d;
 let _flickerGroups3d = {};
 let _autoRotate3d = true;
+let _tailOn = false;
+let _tailLum = 0.50;
+let _tailLen = 0.50;
+let _tailLumB = 0.40;
+let _tailLenB = 0.60;
+let _tailMode = null; // null | 'A' | 'B'
+let _fadeScene = null, _fadeCamera = null, _fadeMat = null;
+let _trailRT = null, _trailScene = null, _trailCam = null, _trailMat = null;
 
 const SCENE_W_3D = 10;
 
@@ -3681,7 +3736,9 @@ function _buildGlowLayers(grp, curve, segs, r, color) {
 
   const mat  = _makeBillboardGlowShader(color, peak);
   mat.uniforms.uGlowR.value = glowR;
-  grp.add(new THREE.Mesh(geo, mat));
+  const glowMesh = new THREE.Mesh(geo, mat);
+  glowMesh.userData.isGlow = true;  // トレイルパスで非表示にするためタグ付け
+  grp.add(glowMesh);
   return [{ mat, base: peak }];
 }
 
@@ -3775,7 +3832,21 @@ function _buildTubes3D() {
       mat1.stencilFunc  = THREE.NotEqualStencilFunc;
       mat1.stencilZPass = THREE.ReplaceStencilOp;
       const geo1 = _buildTubeWithCaps(curve, segs, r, 36, 24);
-      grp.add(new THREE.Mesh(geo1, mat1));
+      const tubeMesh = new THREE.Mesh(geo1, mat1);
+      // トレイル用マテリアル（NormalBlending）
+      // 定常輝度 = 0.9 / (1 - 0.9 * 0.1) = 0.99 → 白飛びなし
+      const tc = new THREE.Color(color);
+      // G/Bチャンネルを持ち上げて彩度を強化（Rは既に1.0が多いのでクランプされるだけ）
+      const hsl = {}; tc.getHSL(hsl);
+      tc.setHSL(hsl.h, Math.min(1.0, hsl.s * 1.2), Math.min(0.9, hsl.l * 2.0));
+      tubeMesh.userData.trailMat = new THREE.MeshBasicMaterial({
+        color: tc,
+        transparent: true, opacity: 0.9,
+        blending: THREE.NormalBlending,
+        depthTest: false, depthWrite: false,
+        side: THREE.DoubleSide
+      });
+      grp.add(tubeMesh);
       _flickerGroups3d[color].push({ mat: mat1, kind: 'wet', base: 1.0 });
 
       // 投影ライト用: このストロークの4サンプル点を記録
@@ -3947,6 +4018,8 @@ function _init3DRenderer() {
   _renderer3d = new THREE.WebGLRenderer({ canvas: canvas3d, antialias: true, preserveDrawingBuffer: true, stencil: true });
   _renderer3d.setPixelRatio(Math.min(devicePixelRatio, 2));
   _renderer3d.setSize(cw, ch);
+  _renderer3d.toneMapping = THREE.ACESFilmicToneMapping;
+  _renderer3d.toneMappingExposure = 1.0;
 
   _scene3d  = new THREE.Scene();
   _camera3d = new THREE.PerspectiveCamera(48, cw / ch, 0.01, 500);
@@ -3965,9 +4038,54 @@ function _init3DRenderer() {
   _tubeGroup3d = new THREE.Group();
   _scene3d.add(_tubeGroup3d);
 
+  // コメットテール用：フェードクワッド（full-screen black transparent plane）
+  _fadeScene  = new THREE.Scene();
+  _fadeCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+  _fadeMat = new THREE.MeshBasicMaterial({
+    color: 0x000000, transparent: true, opacity: 0.1,
+    blending: THREE.NormalBlending,
+    depthTest: false, depthWrite: false
+  });
+  const _fadeGeo  = new THREE.PlaneGeometry(2, 2);
+  const _fadeQuad = new THREE.Mesh(_fadeGeo, _fadeMat);
+  _fadeQuad.frustumCulled = false;
+  _fadeScene.add(_fadeQuad);
+
+  // トレイル用RenderTarget
+  _trailRT = new THREE.WebGLRenderTarget(cw, ch, { minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter });
+  _trailScene = new THREE.Scene();
+  _trailCam   = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+  _trailMat = new THREE.ShaderMaterial({
+    uniforms: { tDiffuse: { value: _trailRT.texture }, uPow: { value: 1.8 } },
+    vertexShader: `
+      varying vec2 vUv;
+      void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }
+    `,
+    fragmentShader: `
+      uniform sampler2D tDiffuse;
+      uniform float uPow;
+      varying vec2 vUv;
+      void main() {
+        vec4 c = texture2D(tDiffuse, vUv);
+        vec3 boosted = pow(max(c.rgb, vec3(0.0)), vec3(uPow));
+        gl_FragColor = vec4(boosted, 1.0);
+      }
+    `,
+    transparent: false,
+    depthTest: false, depthWrite: false,
+    blending: THREE.AdditiveBlending
+  });
+  const _tq   = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), _trailMat);
+  _tq.frustumCulled = false;
+  _trailScene.add(_tq);
+
   window.addEventListener('resize', () => {
     if (!_3dOpen) return;
     const { cw: w, ch: h } = _get3DCanvasSize();
+    if (_tailOn && _trailRT) {
+      _trailRT.setSize(w, h);
+      if (_trailMat?.uniforms?.tDiffuse) _trailMat.uniforms.tDiffuse.value = _trailRT.texture;
+    }
     _camera3d.aspect = w / h;
     _camera3d.updateProjectionMatrix();
     _renderer3d.setSize(w, h);
@@ -4104,12 +4222,87 @@ function _animate3D() {
     mat.uniforms.uWaveAmp.value  = cw + (waveTarget  - cw) * 0.04;
   });
 
-  _renderer3d.clearStencil();
-  // 動画背景の場合は毎フレームテクスチャ更新
-  if (bgVideo.el && bgVideo.el.readyState >= 2) _updateBgPlane3D();
-  _renderer3d.render(_scene3d, _camera3d);
+  // 動画背景の場合は毎フレームテクスチャ更新（TAILモード中はスキップ）
+  if (!_tailOn && bgVideo.el && bgVideo.el.readyState >= 2) _updateBgPlane3D();
 
-  // MP4録画中はmergedCanvasは不要（WebGLキャンバスから直接キャプチャ）
+  if (_tailOn && _3dMotionMode !== 0 && _trailRT) {
+    const savedBg = _scene3d.background;
+
+    // ─ RT蓄積パス ─
+    _renderer3d.setRenderTarget(_trailRT);
+    _renderer3d.autoClear = false;
+
+    if (_tailMode === 'A') {
+      // TAIL A: グローのみ細い発光軌跡
+      _fadeMat.opacity = 0.001 + (1 - _tailLen) * 0.099; // survival: 90%〜99.9%
+      _renderer3d.clearDepth();
+      _renderer3d.render(_fadeScene, _fadeCamera);
+      const savedPeaks = [];
+      _scene3d.background = null;
+      _tubeGroup3d.traverse(c => {
+        if (!c.isMesh) return;
+        if (c.userData.isGlow) {
+          if (c.material.uniforms?.uPeak !== undefined) {
+            savedPeaks.push({ matU: c.material.uniforms, peak: c.material.uniforms.uPeak.value, glowR: c.material.uniforms.uGlowR?.value });
+            c.material.uniforms.uPeak.value *= (0.8 + _tailLum * 0.199); // 80%〜99.9%
+            if (c.material.uniforms.uGlowR) c.material.uniforms.uGlowR.value *= 0.25;
+          }
+        } else { c.visible = false; }
+      });
+      _renderer3d.clearDepth();
+      _renderer3d.render(_scene3d, _camera3d);
+      _tubeGroup3d.traverse(c => { if (c.isMesh && !c.userData.isGlow) c.visible = true; });
+      savedPeaks.forEach(({ matU, peak, glowR }) => { matU.uPeak.value = peak; if (matU.uGlowR && glowR !== undefined) matU.uGlowR.value = glowR; });
+
+    } else if (_tailMode === 'B') {
+      // TAIL B: RTに蓄積してコンポジット（グレー潰しシェーダー共用）
+      _renderer3d.setRenderTarget(_trailRT);
+      _renderer3d.autoClear = false;
+      _fadeMat.opacity = 0.005 + (1 - _tailLenB) * 0.145;
+      _renderer3d.clearDepth();
+      _renderer3d.render(_fadeScene, _fadeCamera);
+      _scene3d.background = null;
+      const glwSaved = [];
+      _tubeGroup3d.traverse(c => {
+        if (c.isMesh && c.userData.isGlow && c.material.uniforms?.uGlowR !== undefined) {
+          glwSaved.push({ uni: c.material.uniforms.uGlowR, val: c.material.uniforms.uGlowR.value });
+          c.material.uniforms.uGlowR.value *= (0.2 + _tailLumB * 1.8);
+        }
+      });
+      const savedExp = _renderer3d.toneMappingExposure;
+      _renderer3d.toneMappingExposure = 0.5;
+      _renderer3d.clearDepth();
+      _renderer3d.clearStencil();
+      _renderer3d.render(_scene3d, _camera3d);
+      _renderer3d.toneMappingExposure = savedExp;
+      glwSaved.forEach(({ uni, val }) => { uni.value = val; });
+      _scene3d.background = savedBg;
+    }
+
+    _scene3d.background = savedBg;
+
+    // ─ スクリーン合成（A/B共通・グレー潰しシェーダー適用）─
+    _renderer3d.setRenderTarget(null);
+    _renderer3d.autoClear = true;
+    _renderer3d.setClearColor(0x000000, 1);
+    _renderer3d.clear();
+    _renderer3d.setClearColor(new THREE.Color(bgColor), 1);
+    _renderer3d.autoClear = false;
+    _renderer3d.render(_trailScene, _trailCam);
+    const mainBg = _scene3d.background;
+    _scene3d.background = null;
+    _renderer3d.clearDepth();
+    _renderer3d.clearStencil();
+    _renderer3d.render(_scene3d, _camera3d);
+    _scene3d.background = mainBg;
+    _renderer3d.autoClear = true;
+
+  } else {
+    _renderer3d.setRenderTarget(null);
+    _renderer3d.clearDepth();
+    _renderer3d.clearStencil();
+    _renderer3d.render(_scene3d, _camera3d);
+  }
 }
 
 // ── enter3D ─────────────────────────────────────────────────────
@@ -4271,9 +4464,20 @@ function toggleWave() {
   document.getElementById('btn-wave').classList.toggle('active', _waveEnabled);
 }
 
-function toggle3DAutoRotate() {
-  // 後方互換（旧ボタンが残っていた場合用）
-  set3DMotion(_3dMotionMode === 0 ? 1 : 0);
+function setTailMode(mode) {
+  _tailMode = (_tailMode === mode) ? null : mode;
+  _tailOn = !!_tailMode;
+  document.getElementById('btn-tail-a').classList.toggle('active', _tailMode === 'A');
+  document.getElementById('btn-tail-b').classList.toggle('active', _tailMode === 'B');
+  document.getElementById('tail-sliders-a').style.display = _tailMode === 'A' ? 'flex' : 'none';
+  document.getElementById('tail-sliders-b').style.display = _tailMode === 'B' ? 'flex' : 'none';
+  if (_renderer3d) {
+    if (_tailOn && _trailRT) {
+      _renderer3d.setRenderTarget(_trailRT); _renderer3d.clear(); _renderer3d.setRenderTarget(null);
+    } else {
+      _renderer3d.autoClear = true; _renderer3d.setRenderTarget(null);
+    }
+  }
 }
 
 

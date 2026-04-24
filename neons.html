@@ -4284,12 +4284,23 @@ function _animate3D() {
     // ─ スクリーン合成（A/B共通・グレー潰しシェーダー適用）─
     _renderer3d.setRenderTarget(null);
     _renderer3d.autoClear = true;
-    _renderer3d.setClearColor(0x000000, 1);
     _renderer3d.clear();
-    _renderer3d.setClearColor(new THREE.Color(bgColor), 1);
+
+    // ① 背景（色・画像）を先に描画
+    const mainBg = _scene3d.background;
+    if (mainBg) {
+      _renderer3d.autoClear = false;
+      // 背景だけのシーンとして一時的にレンダリング
+      const bgScene = new THREE.Scene();
+      bgScene.background = mainBg;
+      _renderer3d.render(bgScene, _camera3d);
+    }
+
+    // ② トレイルRTを加算合成
     _renderer3d.autoClear = false;
     _renderer3d.render(_trailScene, _trailCam);
-    const mainBg = _scene3d.background;
+
+    // ③ メインシーン（背景なし）を上書き
     _scene3d.background = null;
     _renderer3d.clearDepth();
     _renderer3d.clearStencil();

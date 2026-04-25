@@ -1040,6 +1040,7 @@ function _bgVideoExportEnd() {
     bgVideo.el.style.height = '180px';
   }
 }
+function startBgVideoLoop() {
   stopBgVideoLoop();
   const tick = () => {
     bgVideo.rafId = requestAnimationFrame(tick);

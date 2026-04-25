@@ -991,7 +991,11 @@ function loadBgVideo(input) {
   vid.playsInline = true;
   vid.setAttribute('playsinline', '');
   vid.setAttribute('webkit-playsinline', '');
-  vid.style.cssText = 'position:fixed;left:-9999px;top:0;width:640px;height:360px;pointer-events:none';
+  // iOSはデコードサイズを小さくすることでパフォーマンス改善
+  // 書き出し時は復元するので画質には影響しない
+  const isMobile = window.innerWidth <= 430;
+  vid.style.cssText = `position:fixed;left:-9999px;top:0;width:${isMobile ? 320 : 640}px;height:${isMobile ? 180 : 360}px;pointer-events:none`;
+  vid._isMobile = isMobile; // 書き出し時判定用
   document.body.appendChild(vid);
 
   // iOSはユーザージェスチャー直後にplay()を呼ばないと再生できない
@@ -1024,13 +1028,43 @@ function loadBgVideo(input) {
   input.value = '';
 }
 
-function startBgVideoLoop() {
+function _bgVideoExportStart() {
+  if (bgVideo.el && bgVideo.el._isMobile) {
+    bgVideo.el.style.width  = '1920px';
+    bgVideo.el.style.height = '1080px';
+  }
+}
+function _bgVideoExportEnd() {
+  if (bgVideo.el && bgVideo.el._isMobile) {
+    bgVideo.el.style.width  = '320px';
+    bgVideo.el.style.height = '180px';
+  }
+}
   stopBgVideoLoop();
   const tick = () => {
     bgVideo.rafId = requestAnimationFrame(tick);
     if (!bgVideo.el || bgVideo.el.readyState < 2) return;
-    if (shining) return; // SHINEループが描画担当（shining=trueのときSHINEループでdrawBgVideo済み）
-    redrawAll(glowApplied);
+    if (shining) return; // SHINEループが担当
+
+    // 軽量描画：背景色 → 動画フレーム → キャッシュから合成（redrawAllより軽い）
+    ctx.fillStyle = bgColor;
+    ctx.fillRect(0, 0, W, H);
+    drawBgVideo();
+
+    if (glowApplied) {
+      // グローキャッシュを合成
+      ALL_COLORS.forEach(col => {
+        if (!drawLog.some(e => e.color === col)) return;
+        const cache = colorCache[col];
+        if (cache) { ctx.save(); ctx.globalAlpha = 1; ctx.drawImage(cache, 0, 0); ctx.restore(); }
+      });
+    } else {
+      // 生ストロークを描画
+      drawLog.forEach(e => {
+        const s = colorStrokes[e.color]?.[e.idx];
+        if (s) drawStroke(s.points, e.color, s.size, false, ctx);
+      });
+    }
   };
   bgVideo.rafId = requestAnimationFrame(tick);
 }
@@ -2472,6 +2506,7 @@ function exportJPG() {
 }
 
 function exportGIF() {
+  _bgVideoExportStart();
   if (drawLog.length === 0) return;
   const was = shining; if (was) stopShine();
   const allColors = getUsedColors(), n = allColors.length;
@@ -2522,6 +2557,7 @@ function exportGIF() {
     gif.addFrame(tmp, { delay: Math.round(1000/24), copy:true });
   }
   gif.on('finished', blob => {
+    _bgVideoExportEnd();
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a'); a.download=exportFilename('gif'); a.href=url; a.click();
     if (was) startShine();
@@ -2531,6 +2567,7 @@ function exportGIF() {
 
 function exportMP4() {
   if (drawLog.length === 0) return;
+  _bgVideoExportStart();
   const mimeTypes = ['video/mp4;codecs=h264','video/mp4','video/webm;codecs=vp9','video/webm;codecs=vp8','video/webm'];
   const supported = mimeTypes.find(m => MediaRecorder.isTypeSupported(m));
   if (!supported) { alert('MP4/WebM非対応ブラウザです。GIFをご利用ください。'); return; }
@@ -2547,6 +2584,7 @@ function exportMP4() {
   const recorder = new MediaRecorder(stream, { mimeType: supported, videoBitsPerSecond: 8000000 });
   recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
   recorder.onstop = () => {
+    _bgVideoExportEnd();
     const blob = new Blob(chunks, { type: supported.split(';')[0] });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -4040,6 +4078,7 @@ function _init3DRenderer() {
   _renderer3d.setSize(cw, ch);
   _renderer3d.toneMapping = THREE.ACESFilmicToneMapping;
   _renderer3d.toneMappingExposure = 1.0;
+  _renderer3d.outputEncoding = THREE.sRGBEncoding;
 
   _scene3d  = new THREE.Scene();
   _camera3d = new THREE.PerspectiveCamera(48, cw / ch, 0.01, 500);
@@ -4188,6 +4227,8 @@ function _updateBgPlane3D() {
   }
 
   const tex = new THREE.CanvasTexture(offscreen);
+  // sRGBエンコーディングを明示してトーンマッピングによる暗化を防ぐ
+  tex.encoding = THREE.sRGBEncoding;
   _scene3d.background = tex;
 }
 

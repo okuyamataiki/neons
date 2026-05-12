@@ -3039,10 +3039,9 @@ function _selPointerMove(clientX, clientY) {
     redrawAll(glowApplied); drawSelectionHighlight(); updateSelBox();
   } else if (_selState.mode==='rubber') {
     const { x:sx, y:sy } = _selState.startScreen;
-    const cvRect=CV.getBoundingClientRect();
     const rubber=document.getElementById('sel-rubber');
-    rubber.style.left   = (Math.min(sx,clientX)-cvRect.left)+'px';
-    rubber.style.top    = (Math.min(sy,clientY)-cvRect.top)+'px';
+    rubber.style.left   = Math.min(sx,clientX)+'px';
+    rubber.style.top    = Math.min(sy,clientY)+'px';
     rubber.style.width  = Math.abs(clientX-sx)+'px';
     rubber.style.height = Math.abs(clientY-sy)+'px';
     rubber.style.display = (Math.abs(clientX-sx)>4||Math.abs(clientY-sy)>4)?'block':'none';

@@ -519,7 +519,10 @@ select option { background: #111; }
 }
 .bg-dot.active { border-color: rgba(255,255,255,0.7); }
 
-.layer-item {
+#sel-size-slider::-webkit-slider-thumb {
+  -webkit-appearance:none;width:12px;height:12px;border-radius:50%;
+  background:rgba(255,255,255,0.7);cursor:pointer;
+}
   display: flex; align-items: center; gap: 5px;
   padding: 3px 2px; border-radius: 2px;
   cursor: default; user-select: none;
@@ -620,6 +623,16 @@ select option { background: #111; }
 </div>
 
 <!-- SELECT DELETE BUTTON (outside overlay) -->
+<div id="sel-size-ctrl" style="display:none;position:fixed;bottom:70px;left:50%;transform:translateX(-50%);
+  background:rgba(0,0,0,0.75);border:0.5px solid rgba(255,255,255,0.2);border-radius:3px;
+  padding:6px 14px;display:none;align-items:center;gap:10px;z-index:30;white-space:nowrap">
+  <span style="font-family:'Space Mono',monospace;font-size:8px;letter-spacing:0.1em;color:rgba(255,255,255,0.4)">SIZE</span>
+  <input type="range" id="sel-size-slider" min="5" max="200" value="100"
+    style="-webkit-appearance:none;width:100px;height:2px;background:rgba(255,255,255,0.3);outline:none;cursor:pointer"
+    oninput="onSelSizeChange(this.value)">
+  <span id="sel-size-val" style="font-family:'Space Mono',monospace;font-size:8px;letter-spacing:0.1em;color:rgba(255,255,255,0.5);min-width:30px">100%</span>
+</div>
+
 <div id="sel-delete" style="display:none;position:fixed;bottom:28px;left:50%;transform:translateX(-50%);
   background:rgba(0,0,0,0.75);border:0.5px solid rgba(255,80,80,0.5);border-radius:3px;
   padding:7px 20px;font-family:'Space Mono',monospace;font-size:9px;letter-spacing:0.15em;
@@ -2887,6 +2900,9 @@ function clearSelection() {
   document.getElementById('sel-delete').style.display = 'none';
   document.getElementById('sel-copy').style.display = 'none';
   document.getElementById('sel-paste-hint').style.display = 'none';
+  document.getElementById('sel-size-ctrl').style.display = 'none';
+  // 太さ変更があればUNDO履歴に保存
+  if (Object.keys(_selOrigSizes).length) { saveHist(); saveToLocal(); _selOrigSizes = {}; }
   redrawAll(glowApplied);
 }
 
@@ -2952,6 +2968,18 @@ function updateSelBox() {
   box.style.display = 'block';
   document.getElementById('sel-delete').style.display = 'block';
   document.getElementById('sel-copy').style.display = 'block';
+
+  // 太さスライダーを表示・初期化
+  const sizeCtrl = document.getElementById('sel-size-ctrl');
+  sizeCtrl.style.display = 'flex';
+  document.getElementById('sel-size-slider').value = 100;
+  document.getElementById('sel-size-val').textContent = '100%';
+  // 選択中の元サイズを記録
+  _selOrigSizes = {};
+  selectedIds.forEach(id => {
+    const r = getStrokeById(id);
+    if (r?.stroke) _selOrigSizes[id] = r.stroke.size;
+  });
 }
 
 function drawSelectionHighlight() {
@@ -3219,6 +3247,23 @@ document.addEventListener('keydown', e=>{
   if(selectMode&&(e.metaKey||e.ctrlKey)&&e.key==='c'&&selectedIds.length){ e.preventDefault(); copySelected(); }
   if(selectMode&&(e.metaKey||e.ctrlKey)&&e.key==='v'&&_clipboard){ e.preventDefault(); pasteAtVisibleCenter(); }
 });
+// ── 選択中ストロークの太さ変更 ────────────────────────────────
+let _selOrigSizes = {};
+
+function onSelSizeChange(val) {
+  const ratio = +val / 100;
+  document.getElementById('sel-size-val').textContent = val + '%';
+  selectedIds.forEach(id => {
+    const r = getStrokeById(id);
+    if (!r?.stroke) return;
+    const orig = _selOrigSizes[id] ?? r.stroke.size;
+    r.stroke.size = Math.max(1, Math.round(orig * ratio));
+  });
+  Object.keys(colorStrokes).forEach(k => delete colorCache[k]);
+  redrawAll(glowApplied);
+  drawSelectionHighlight();
+}
+
 // ── コピー・ペースト ──────────────────────────────────────────
 let _clipboard = null; // { strokes:[{color,size,points:[]}], cx, cy }
 

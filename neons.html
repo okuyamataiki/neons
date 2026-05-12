@@ -685,7 +685,7 @@ select option { background: #111; }
   <div class="panel-body">
     <div class="sec">
       <div class="lbl">① COLOR</div>
-      <div id="color-used" style="display:flex;flex-direction:column;gap:4px"></div>
+      <div id="color-used" style="display:flex;flex-direction:column;gap:4px;touch-action:none"></div>
       <!-- カラーピッカー（使用済みの下） -->
       <div style="margin-top:8px;display:flex;align-items:center;justify-content:center">
         <div style="position:relative;display:flex;align-items:center;justify-content:center">
@@ -1005,11 +1005,13 @@ function loadBgVideo(input) {
   let started = false;
   const setup = () => {
     if (started) return;
-    if (!vid.videoWidth || !vid.videoHeight) return;
     started = true;
-    const sc = Math.min(W / vid.videoWidth, H / vid.videoHeight);
-    bgVideo.w = vid.videoWidth  * sc;
-    bgVideo.h = vid.videoHeight * sc;
+    // サイズが取れない場合は動画の実際のサイズか16:9をフォールバック
+    const vw = vid.videoWidth  || 1280;
+    const vh = vid.videoHeight || 720;
+    const sc = Math.min(W / vw, H / vh);
+    bgVideo.w = vw * sc;
+    bgVideo.h = vh * sc;
     bgVideo.x = (W - bgVideo.w) / 2;
     bgVideo.y = (H - bgVideo.h) / 2;
     bgVideo.rot = 0;
@@ -1018,12 +1020,25 @@ function loadBgVideo(input) {
     bgVideo.el = vid;
     startBgVideoLoop();
     openBgTransform();
+    // サイズが後から判明したら更新
+    if (!vid.videoWidth) {
+      const updateSize = () => {
+        if (!vid.videoWidth || !vid.videoHeight) return;
+        const s = Math.min(W / vid.videoWidth, H / vid.videoHeight);
+        bgVideo.w = vid.videoWidth  * s;
+        bgVideo.h = vid.videoHeight * s;
+        bgVideo.x = (W - bgVideo.w) / 2;
+        bgVideo.y = (H - bgVideo.h) / 2;
+      };
+      vid.addEventListener('loadedmetadata', updateSize, { once: true });
+      vid.addEventListener('canplay',        updateSize, { once: true });
+    }
   };
 
-  vid.addEventListener('loadedmetadata', setup);
-  vid.addEventListener('canplay',        setup);
-  vid.addEventListener('playing',        setup);
-  setTimeout(() => { if (!started) setup(); }, 1500);
+  vid.addEventListener('loadedmetadata', setup, { once: true });
+  vid.addEventListener('canplay',        setup, { once: true });
+  vid.addEventListener('playing',        setup, { once: true });
+  setTimeout(() => setup(), 800); // iOSフォールバック
 
   input.value = '';
 }
@@ -1359,107 +1374,134 @@ function makeDot(color, isUsed) {
   dot.style.background = color;
   d.appendChild(dot);
 
-  // 使用済み色のみドラッグハンドル追加
   if (isUsed) {
-    d.draggable = true;
     d.style.cursor = 'grab';
-    d.addEventListener('dragstart', onColorDragStart);
-    d.addEventListener('dragover',  onColorDragOver);
-    d.addEventListener('drop',      onColorDrop);
-    d.addEventListener('dragend',   onColorDragEnd);
-    // タッチ対応
-    d.addEventListener('touchstart', onColorTouchStart);
   }
   return d;
 }
 
 // ── カラードラッグ並び替え ────────────────────────────────────
-let _dragColor = null, _dragEl = null;
+// color-usedコンテナ上でmousedown/touchstartを監視して完結させる
+function _initColorDrag() {
+  const container = document.getElementById('color-used');
+  if (!container) return;
+  let dragColor = null, dragEl = null, ghost = null, dragging = false, x0 = 0, y0 = 0;
+  let hoverTarget = null;
 
-function onColorDragStart(e) {
-  _dragColor = e.currentTarget.dataset.color;
-  _dragEl = e.currentTarget;
-  e.dataTransfer.effectAllowed = 'move';
-  setTimeout(() => { if (_dragEl) _dragEl.style.opacity = '0.4'; }, 0);
-}
-function onColorDragOver(e) {
-  e.preventDefault();
-  e.dataTransfer.dropEffect = 'move';
-}
-function onColorDrop(e) {
-  e.preventDefault();
-  const targetColor = e.currentTarget.dataset.color;
-  if (!_dragColor || _dragColor === targetColor) return;
-  _reorderColor(_dragColor, targetColor);
-}
-function onColorDragEnd() {
-  if (_dragEl) _dragEl.style.opacity = '';
-  _dragEl = null; _dragColor = null;
-}
+  const getDots = () => [...container.querySelectorAll('.cdot-btn[data-color]')];
 
-// タッチドラッグ（長押し300msでドラッグ開始）
-let _touchDragColor = null, _touchGhost = null;
-function onColorTouchStart(e) {
-  if (e.touches.length !== 1) return;
-  const el = e.currentTarget;
-  const t0 = e.touches[0];
-  let moved = false;
-  let longPressTimer = null;
+  const getDotAt = (cx, cy) => {
+    const PAD = 24;
+    return getDots().find(d => {
+      if (d === dragEl) return false;
+      const r = d.getBoundingClientRect();
+      return cx >= r.left-PAD && cx <= r.right+PAD && cy >= r.top-PAD && cy <= r.bottom+PAD;
+    }) || null;
+  };
 
-  const onMove = ev => {
-    const tc = ev.touches[0];
-    if (Math.abs(tc.clientX - t0.clientX) > 8 || Math.abs(tc.clientY - t0.clientY) > 8) {
-      moved = true;
-      clearTimeout(longPressTimer);
+  const clearSlide = () => {
+    const spacer = container.querySelector('.drag-spacer');
+    if (spacer) spacer.remove();
+    hoverTarget = null;
+  };
+
+  const applySlide = (overDot) => {
+    if (overDot === hoverTarget) return;
+    hoverTarget = overDot;
+    // スペーサーを目標位置に挿入してスペースを作る
+    let spacer = container.querySelector('.drag-spacer');
+    if (!spacer) {
+      spacer = document.createElement('div');
+      spacer.className = 'drag-spacer';
+      const h = dragEl.getBoundingClientRect().height;
+      spacer.style.cssText = `height:${h}px;transition:none;flex-shrink:0`;
     }
-    if (_touchGhost) {
-      ev.preventDefault();
-      _touchGhost.style.left = (tc.clientX - 12) + 'px';
-      _touchGhost.style.top  = (tc.clientY - 12) + 'px';
+    const dots = getDots().filter(d => d !== dragEl);
+    const toIdx = dots.indexOf(overDot);
+    // overDotの前か後かを判断
+    const fromIdx = getDots().indexOf(dragEl);
+    const toIdxFull = getDots().indexOf(overDot);
+    if (fromIdx < toIdxFull) {
+      overDot.after(spacer);
+    } else {
+      overDot.before(spacer);
     }
   };
 
-  const onEnd = ev => {
-    clearTimeout(longPressTimer);
-    document.removeEventListener('touchmove', onMove);
-    document.removeEventListener('touchend', onEnd);
-    el.style.opacity = '';
-    if (_touchGhost) { _touchGhost.remove(); _touchGhost = null; }
-    if (_touchDragColor) {
-      const tc = ev.changedTouches[0];
-      const target = document.elementFromPoint(tc.clientX, tc.clientY)?.closest('.cdot-btn');
-      if (target && target.dataset.color && target.dataset.color !== _touchDragColor) {
-        _reorderColor(_touchDragColor, target.dataset.color);
-      }
-      _touchDragColor = null;
+  const start = (el, cx, cy) => {
+    dragColor = el.dataset.color; dragEl = el;
+    x0 = cx; y0 = cy; dragging = false; ghost = null;
+  };
+
+  const move = (cx, cy) => {
+    if (!dragEl) return;
+    if (!dragging && Math.hypot(cx-x0, cy-y0) > 6) {
+      dragging = true;
+      dragEl.style.opacity = '0.3';
+      ghost = dragEl.cloneNode(true);
+      const r = dragEl.getBoundingClientRect();
+      ghost.style.cssText = `position:fixed;pointer-events:none;z-index:9999;opacity:0.9;transform:scale(1.2);transition:none;left:${r.left}px;top:${r.top}px;width:${r.width}px;height:${r.height}px`;
+      document.body.appendChild(ghost);
+    }
+    if (ghost) { ghost.style.left=(cx-16)+'px'; ghost.style.top=(cy-16)+'px'; }
+    if (dragging) {
+      const over = getDotAt(cx, cy);
+      if (over) applySlide(over); else clearSlide();
     }
   };
 
-  document.addEventListener('touchmove', onMove, { passive: false });
-  document.addEventListener('touchend', onEnd);
+  const end = (cx, cy) => {
+    if (!dragEl) return;
+    clearSlide();
+    dragEl.style.opacity = '';
+    if (ghost) { ghost.remove(); ghost = null; }
+    if (dragging) {
+      const target = getDotAt(cx, cy);
+      if (target) _reorderColor(dragColor, target.dataset.color);
+    }
+    dragEl = null; dragColor = null; dragging = false;
+  };
 
-  // 300ms長押しでドラッグ開始
-  longPressTimer = setTimeout(() => {
-    if (moved) return;
-    e.preventDefault();
-    _touchDragColor = el.dataset.color;
-    _touchGhost = el.cloneNode(true);
-    _touchGhost.style.cssText = 'position:fixed;opacity:0.7;pointer-events:none;z-index:9999;transform:scale(1.1)';
-    document.body.appendChild(_touchGhost);
-    _touchGhost.style.left = (t0.clientX - 12) + 'px';
-    _touchGhost.style.top  = (t0.clientY - 12) + 'px';
-    el.style.opacity = '0.4';
-  }, 300);
+  container.addEventListener('mousedown', e => {
+    const dot = e.target.closest('.cdot-btn[data-color]'); if (!dot) return;
+    e.preventDefault(); start(dot, e.clientX, e.clientY);
+  });
+  document.addEventListener('mousemove', e => { if(dragEl) move(e.clientX, e.clientY); });
+  document.addEventListener('mouseup',   e => { if(dragEl) end(e.clientX, e.clientY); });
+
+  const attachDotTouch = (dot) => {
+    if (dot._touchAttached) return;
+    dot._touchAttached = true;
+    dot.addEventListener('touchstart', e => {
+      e.preventDefault(); e.stopPropagation();
+      const t = e.touches[0]; start(dot, t.clientX, t.clientY);
+    }, { passive: false });
+  };
+  container.querySelectorAll('.cdot-btn[data-color]').forEach(attachDotTouch);
+  new MutationObserver(mutations => {
+    mutations.forEach(m => m.addedNodes.forEach(n => {
+      if (n.classList?.contains('cdot-btn')) attachDotTouch(n);
+    }));
+  }).observe(container, { childList: true });
+
+  document.addEventListener('touchmove', e => {
+    if (!dragEl) return; e.preventDefault();
+    const t = e.touches[0]; move(t.clientX, t.clientY);
+  }, { passive: false });
+  document.addEventListener('touchend', e => {
+    if (!dragEl) return;
+    const t = e.changedTouches[0]; end(t.clientX, t.clientY);
+  });
 }
+// DOMContentLoaded後に初期化（updateColorPalette後に再呼び出しも必要）
+// → updateColorPaletteの末尾で_initColorDrag()を呼ぶ
 
 function _reorderColor(fromColor, toColor) {
-  // ALL_COLORSの順番を入れ替え
   const fi = ALL_COLORS.indexOf(fromColor);
   const ti = ALL_COLORS.indexOf(toColor);
   if (fi < 0 || ti < 0) return;
   ALL_COLORS.splice(fi, 1);
   ALL_COLORS.splice(ti, 0, fromColor);
-  // layerOrderも同様に
   const li = layerOrder.indexOf(fromColor);
   const lt = layerOrder.indexOf(toColor);
   if (li >= 0 && lt >= 0) {
@@ -1468,10 +1510,9 @@ function _reorderColor(fromColor, toColor) {
   }
   updateColorPalette();
   if (shining) { stopShine(); startShine(); }
-  if (_3dOpen) _buildShineSeq();
+  if (_3dOpen) _buildShineSeq?.();
   saveToLocal();
 }
-// ── カラードラッグ END ────────────────────────────────────────
 
 function replaceColorPreview(oldColor, newColor) {
   // DOM操作なし・履歴なし。キャンバスだけ更新してプレビュー
@@ -1539,10 +1580,10 @@ function replaceColor(oldColor, newColor) {
 }
 
 function updateColorPalette() {
-  // 使用済み色：drawLogから順番に（重複なし）
-  const usedColors = [];
-  drawLog.forEach(e => { if (!usedColors.includes(e.color)) usedColors.push(e.color); });
-  const unusedColors = ALL_COLORS.filter(c => !usedColors.includes(c));
+  // 使用済み色：ALL_COLORSの順番を維持（並べ替えが反映される）
+  const activeColors = new Set(drawLog.map(e => e.color));
+  const usedColors   = ALL_COLORS.filter(c => activeColors.has(c));
+  const unusedColors = ALL_COLORS.filter(c => !activeColors.has(c));
 
   const usedEl = document.getElementById('color-used');
   const unusedEl = document.getElementById('color-unused');
@@ -3169,6 +3210,9 @@ window.addEventListener('DOMContentLoaded', ()=>{
   const pasteBtn = document.getElementById('sel-paste-hint');
   pasteBtn.addEventListener('click',      pasteAtVisibleCenter);
   pasteBtn.addEventListener('touchstart', e => { e.preventDefault(); e.stopPropagation(); pasteAtVisibleCenter(); }, { passive: false });
+
+  // カラードラッグ：1回だけ初期化
+  _initColorDrag();
 });
 document.addEventListener('keydown', e=>{
   if(selectMode&&(e.key==='Delete'||e.key==='Backspace')&&selectedIds.length){ e.preventDefault(); deleteSelected(); }
@@ -4453,40 +4497,33 @@ function _get3DExportSize() {
 
 function export3DStill(type) {
   const { w, h } = _get3DExportSize();
-  const canvas   = document.getElementById('canvas-3d');
-  const origW    = canvas.width, origH = canvas.height;
+  const canvas = document.getElementById('canvas-3d');
+  const origW  = canvas.width, origH = canvas.height;
 
-  // iOSはWebGL高解像度リサイズで失敗するため
-  // スクリーンサイズでレンダリングしてから2Dキャンバスで拡大する
+  // 現在のフレームバッファをそのまま取得（残像込み）
+  // _animate3Dが毎フレーム描画済みなので追加レンダリング不要
   const isHighRes = (w !== origW || h !== origH);
 
-  if (isHighRes) {
-    // 現在のサイズでレンダリング
-    _renderer3d.render(_scene3d, _camera3d);
+  const capture = () => {
+    if (isHighRes) {
+      const offscreen = document.createElement('canvas');
+      offscreen.width  = w;
+      offscreen.height = h;
+      const oc = offscreen.getContext('2d');
+      oc.imageSmoothingEnabled = true;
+      oc.imageSmoothingQuality = 'high';
+      oc.drawImage(canvas, 0, 0, w, h);
+      return offscreen.toDataURL(type === 'jpg' ? 'image/jpeg' : 'image/png', 0.97);
+    } else {
+      return canvas.toDataURL(type === 'jpg' ? 'image/jpeg' : 'image/png', 0.97);
+    }
+  };
 
-    // オフスクリーン2Dキャンバスで目標解像度にスケーリング
-    const offscreen = document.createElement('canvas');
-    offscreen.width  = w;
-    offscreen.height = h;
-    const oc = offscreen.getContext('2d');
-    oc.imageSmoothingEnabled = true;
-    oc.imageSmoothingQuality = 'high';
-    oc.drawImage(canvas, 0, 0, w, h);
-
-    const link = document.createElement('a');
-    const ts   = new Date().toISOString().slice(0,19).replace(/[:T]/g,'-');
-    link.download = 'NEONS_3D_' + ts + '.' + type;
-    link.href = offscreen.toDataURL(type === 'jpg' ? 'image/jpeg' : 'image/png', 0.97);
-    link.click();
-  } else {
-    // スクリーンサイズはそのまま書き出し
-    _renderer3d.render(_scene3d, _camera3d);
-    const link = document.createElement('a');
-    const ts   = new Date().toISOString().slice(0,19).replace(/[:T]/g,'-');
-    link.download = 'NEONS_3D_' + ts + '.' + type;
-    link.href = canvas.toDataURL(type === 'jpg' ? 'image/jpeg' : 'image/png', 0.97);
-    link.click();
-  }
+  const link = document.createElement('a');
+  const ts   = new Date().toISOString().slice(0,19).replace(/[:T]/g,'-');
+  link.download = 'NEONS_3D_' + ts + '.' + type;
+  link.href = capture();
+  link.click();
 }
 
 let _3dRecorder = null, _3dChunks = [];

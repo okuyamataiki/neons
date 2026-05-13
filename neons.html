@@ -1477,7 +1477,8 @@ function _initColorDrag() {
 
   container.addEventListener('mousedown', e => {
     const dot = e.target.closest('.cdot-btn[data-color]'); if (!dot) return;
-    e.preventDefault(); start(dot, e.clientX, e.clientY);
+    // preventDefaultを外す → onclickが正常に発火するようにする
+    start(dot, e.clientX, e.clientY);
   });
   document.addEventListener('mousemove', e => { if(dragEl) move(e.clientX, e.clientY); });
   document.addEventListener('mouseup',   e => { if(dragEl) end(e.clientX, e.clientY); });
@@ -1486,9 +1487,9 @@ function _initColorDrag() {
     if (dot._touchAttached) return;
     dot._touchAttached = true;
     dot.addEventListener('touchstart', e => {
-      e.preventDefault(); e.stopPropagation();
       const t = e.touches[0]; start(dot, t.clientX, t.clientY);
-    }, { passive: false });
+      // タップかドラッグか不明なのでpreventDefaultはまだしない
+    }, { passive: true });
   };
   container.querySelectorAll('.cdot-btn[data-color]').forEach(attachDotTouch);
   new MutationObserver(mutations => {
@@ -1498,8 +1499,9 @@ function _initColorDrag() {
   }).observe(container, { childList: true });
 
   document.addEventListener('touchmove', e => {
-    if (!dragEl) return; e.preventDefault();
+    if (!dragEl) return;
     const t = e.touches[0]; move(t.clientX, t.clientY);
+    if (dragging) e.preventDefault(); // ドラッグ確定後だけスクロールを止める
   }, { passive: false });
   document.addEventListener('touchend', e => {
     if (!dragEl) return;
